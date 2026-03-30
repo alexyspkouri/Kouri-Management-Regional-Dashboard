@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+l<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -290,137 +290,102 @@ tbody td { padding: 9px 14px; color: #333; }
   color: white;
 }
 .view-toggle span:hover:not(.active) { background: #f0f0f0; }
-
-/* ─── Refresh Button ─── */
-#refreshBtn {
-  padding: 9px 16px;
-  background: #0066cc;
-  color: white;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-#refreshBtn:hover:not(:disabled) {
-  background: #0052a3;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
-}
-#refreshBtn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-#refreshBtn.success {
-  background: #2e7d32;
-}
-#refreshBtn.error {
-  background: #c62828;
-}
-
-#refreshBtnIcon {
-  display: inline-block;
-}
 </style>
 </head>
 <body>
 
+<!-- Header -->
 <div class="header">
   <div class="header-brand">
     <div class="header-logo">K</div>
     <div>
-      <div class="header-title">Compliance Dashboard</div>
-      <div class="header-sub">AppFolio → Sheets → Analytics</div>
+      <div class="header-title">Kouri Management</div>
+      <div class="header-sub">Compliance Dashboard</div>
     </div>
   </div>
-  <div class="header-meta">
-    <div id="lastUpdated" style="font-weight: 600;">—</div>
-    <button id="refreshBtn" style="margin-top: 6px;">
-      <span id="refreshBtnIcon">🔄</span> Refresh Data
+  <div style="display: flex; align-items: center; gap: 18px;">
+    <div class="header-meta" id="lastUpdated">Loading data…</div>
+    <button id="refreshBtn" title="Manually sync data from AppFolio">
+      <span id="refreshBtnIcon">⟳</span> Refresh
     </button>
   </div>
 </div>
 
+<!-- Tabs -->
 <div class="tab-bar">
-  <button class="tab-btn active" onclick="showTab('dq')">
-    📋 Delinquency Audit
-    <span class="tab-badge" id="dq-badge">0</span>
-  </button>
-  <button class="tab-btn" onclick="showTab('wo')">
+  <div class="tab-btn active" id="tb-dq" onclick="showTab('dq')">
+    🏠 Delinquency Audit
+    <span class="tab-badge" id="dq-badge">—</span>
+  </div>
+  <div class="tab-btn" id="tb-wo" onclick="showTab('wo')">
     🔧 Work Orders
-    <span class="tab-badge" id="wo-badge">0</span>
-  </button>
+    <span class="tab-badge" id="wo-badge">—</span>
+  </div>
 </div>
 
-<div class="content">
-
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
-<!-- TAB: DELINQUENCY AUDIT -->
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
-<div id="tab-dq">
-
-  <!-- Summary Cards -->
-  <div class="cards" id="dq-cards">
-    <div class="card"><div class="card-label">Total Tenants</div><div class="card-value">—</div></div>
-    <div class="card red"><div class="card-label">Non-Compliant</div><div class="card-value red">—</div></div>
-    <div class="card orange"><div class="card-label">Delinquent Balance</div><div class="card-value money">—</div></div>
-    <div class="card amber"><div class="card-label">Evicting</div><div class="card-value amber">—</div></div>
+<!-- ═══════════════════ DQ TAB ═══════════════════ -->
+<div id="tab-dq" class="content">
+  <div class="error-state" id="dq-error" style="display:none">
+    ⚠️ <strong>Could not load delinquency data.</strong><br><br>
+    To fix this, open the Google Sheet → Share → Change access to <strong>"Anyone on the internet with this link → Viewer"</strong>, then refresh this page.
   </div>
 
-  <!-- Main Layout: POD List + Details -->
-  <div class="panels">
+  <div id="dq-loading" class="loading-state">
+    <div class="spinner"></div><br>Loading delinquency data…
+  </div>
 
-    <!-- POD Summary Panel -->
-    <div class="panel">
-      <div class="panel-header">
-        <div class="panel-title" id="dq-pod-pill">PODs</div>
-        <div id="dq-clear" style="display: none;"><span class="clear-btn" onclick="clearPOD('dq')">Clear filter</span></div>
-      </div>
-      <div class="toolbar">
-        <div class="chips">
-          <span class="chip on" id="dq-f-all" onclick="setDQFilter('all')">All</span>
-          <span class="chip" id="dq-f-ok" onclick="setDQFilter('ok')">Compliant</span>
-          <span class="chip on red" id="dq-f-nc" onclick="setDQFilter('nc')">Non-Comp</span>
-          <span class="chip on amber" id="dq-f-ev" onclick="setDQFilter('ev')">Evicting</span>
+  <div id="dq-content" style="display:none">
+    <!-- Summary Cards -->
+    <div class="cards" id="dq-cards"></div>
+
+    <!-- Two Panels -->
+    <div class="panels">
+
+      <!-- Left: POD table -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">By Property Group</span>
+          <div class="view-toggle">
+            <span id="dq-tog-bal" class="active" onclick="setDQPodView('$')">$ Balance</span>
+            <span id="dq-tog-cnt"               onclick="setDQPodView('#')"># Tenants</span>
+          </div>
+        </div>
+        <div class="pod-tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th onclick="podSort('dq','pod')" style="width:7%">POD</th>
+                <th onclick="podSort('dq','balance')" style="text-align:right;width:9%">Outstanding</th>
+                <th onclick="podSort('dq','d030')"    style="text-align:right;width:7%;color:#1565c0">0–30 Day</th>
+                <th onclick="podSort('dq','balOk')"   style="text-align:right;color:#2e7d32;width:8%" id="dq-th-ok">✓ Compliant</th>
+                <th onclick="podSort('dq','balOC')"   style="text-align:right;color:#c62828;width:8%" id="dq-th-oc">✗ Non-Comp</th>
+                <th onclick="podSort('dq','ev')"      style="text-align:right;color:#6a1b9a;width:9%" id="dq-th-ev">⚖ Evicting</th>
+              </tr>
+            </thead>
+            <tbody id="dq-pod-body"></tbody>
+          </table>
+        </div>
+        <div style="padding:8px 14px;border-top:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center">
+          <span class="pill" id="dq-pod-pill">— PODs</span>
+          <span class="clear-btn" onclick="clearPOD('dq')" id="dq-clear" style="display:none">Clear filter</span>
         </div>
       </div>
-      <div class="pod-tbl-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th onclick="podSort('dq','pod')">POD</th>
-              <th onclick="podSort('dq','total')" style="text-align:right">Total</th>
-              <th onclick="podSort('dq','oc')" style="text-align:right">Non-C</th>
-              <th onclick="podSort('dq','ev')" style="text-align:right">Evict</th>
-            </tr>
-          </thead>
-          <tbody id="dq-pod-body"></tbody>
-        </table>
-      </div>
-    </div>
 
-    <!-- Delinquency Details Panel -->
-    <div class="panel">
-      <div class="panel-header">
-        <div style="flex:1">
-          <div class="panel-title" id="dq-detail-title">All Tenants</div>
-          <div class="panel-hint" id="dq-detail-pill">0 rows</div>
+      <!-- Right: Detail table -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title" id="dq-detail-title">All Tenants</span>
+          <span class="pill" id="dq-detail-pill">— tenants</span>
         </div>
-      </div>
-      <div class="toolbar">
-        <input class="search-input" id="dq-search" placeholder="Search tenant, property…" oninput="renderDQDetail()">
-      </div>
-      <div id="dq-loading" class="loading-state">
-        <div class="spinner"></div>
-        Loading delinquency data…
-      </div>
-      <div id="dq-error" class="error-state" style="display:none;margin:0;border-radius:0">
-        ⚠️ Error loading delinquency data. Check console for details.
-      </div>
-      <div id="dq-content" style="display:none">
+        <div class="toolbar">
+          <input class="search-input" id="dq-search" placeholder="Search tenant, property, unit…" oninput="renderDQDetail()">
+          <div class="chips">
+            <div class="chip on" id="dq-f-all"    onclick="setDQFilter('all')">All</div>
+            <div class="chip"    id="dq-f-ok"     onclick="setDQFilter('ok')">✓ Compliant</div>
+            <div class="chip"    id="dq-f-nc"     onclick="setDQFilter('nc')">✗ Non-Comp</div>
+            <div class="chip"    id="dq-f-ev"     onclick="setDQFilter('ev')" style="color:#6a1b9a;border-color:#ce93d8">⚖ Evicting</div>
+          </div>
+        </div>
         <div class="tbl-wrap">
           <table>
             <thead>
@@ -428,91 +393,85 @@ tbody td { padding: 9px 14px; color: #333; }
                 <th onclick="detSort('dq','tenant')">Tenant</th>
                 <th onclick="detSort('dq','property')">Property</th>
                 <th onclick="detSort('dq','unit')">Unit</th>
-                <th onclick="detSort('dq','balance')" style="text-align:right">Balance</th>
+                <th onclick="detSort('dq','balance')">Balance</th>
                 <th onclick="detSort('dq','lease')">Lease</th>
                 <th onclick="detSort('dq','status')">Status</th>
-                <th onclick="detSort('dq','lastpay')" style="text-align:right">Last Pay</th>
-                <th onclick="detSort('dq','lastamt')" style="text-align:right">Amount</th>
-                <th>Notes</th>
-                <th>Compliance</th>
-                <th onclick="detSort('dq','moveout')">Move Out</th>
+                <th onclick="detSort('dq','last_pay_date')">Last Pmt Date</th>
+                <th onclick="detSort('dq','last_pay_amt')">Last Pmt Amt</th>
+                <th>Last Note</th>
+                <th>Compliance Note</th>
+                <th onclick="detSort('dq','move_out_date')">Move Out Date</th>
               </tr>
             </thead>
             <tbody id="dq-detail-body"></tbody>
           </table>
         </div>
       </div>
-    </div>
 
+    </div>
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
-<!-- TAB: WORK ORDERS -->
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
-<div id="tab-wo" style="display:none">
-
-  <!-- Summary Cards -->
-  <div class="cards" id="wo-cards">
-    <div class="card"><div class="card-label">Total WOs</div><div class="card-value">—</div></div>
-    <div class="card red"><div class="card-label">Over 60 Days</div><div class="card-value red">—</div></div>
-    <div class="card orange"><div class="card-label">Resident 7+ Days</div><div class="card-value orange">—</div></div>
-    <div class="card amber"><div class="card-label">Resident New</div><div class="card-value amber">—</div></div>
+<!-- ═══════════════════ WO TAB ═══════════════════ -->
+<div id="tab-wo" class="content" style="display:none">
+  <div class="error-state" id="wo-error" style="display:none">
+    ⚠️ <strong>Could not load work order data.</strong><br><br>
+    To fix this, open the Google Sheet → Share → Change access to <strong>"Anyone on the internet with this link → Viewer"</strong>, then refresh this page.
   </div>
 
-  <!-- Main Layout: POD List + Details -->
-  <div class="panels">
+  <div id="wo-loading" class="loading-state">
+    <div class="spinner"></div><br>Loading work order data…
+  </div>
 
-    <!-- POD Summary Panel -->
-    <div class="panel">
-      <div class="panel-header">
-        <div class="panel-title" id="wo-pod-pill">PODs</div>
-        <div id="wo-clear" style="display: none;"><span class="clear-btn" onclick="clearPOD('wo')">Clear filter</span></div>
-      </div>
-      <div class="toolbar">
-        <div class="chips">
-          <span class="chip on" id="wo-f-all" onclick="setWOFilter('all')">All</span>
-          <span class="chip on red" id="wo-f-60" onclick="setWOFilter('Over 60 Days')">60+ Days</span>
-          <span class="chip on orange" id="wo-f-r7" onclick="setWOFilter('Resident WOs Over 7 Days')">Res 7d+</span>
-          <span class="chip on amber" id="wo-f-rn" onclick="setWOFilter('Resident WOs New')">Res New</span>
-          <span class="chip on" id="wo-f-oth" onclick="setWOFilter('Other')">Other</span>
+  <div id="wo-content" style="display:none">
+    <!-- Summary Cards -->
+    <div class="cards" id="wo-cards"></div>
+
+    <!-- Two Panels -->
+    <div class="panels">
+
+      <!-- Left: POD table -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">By Property Group</span>
+          <span class="panel-hint">Click to filter →</span>
+        </div>
+        <div class="pod-tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th onclick="podSort('wo','pod')">POD</th>
+                <th onclick="podSort('wo','total')">Total</th>
+                <th onclick="podSort('wo','over60')" style="color:#c62828">60+d</th>
+                <th onclick="podSort('wo','res7')"   style="color:#e65100">Res 7d</th>
+                <th onclick="podSort('wo','resnew')" style="color:#f57f17">Res New</th>
+              </tr>
+            </thead>
+            <tbody id="wo-pod-body"></tbody>
+          </table>
+        </div>
+        <div style="padding:8px 14px;border-top:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center">
+          <span class="pill" id="wo-pod-pill">— PODs</span>
+          <span class="clear-btn" onclick="clearPOD('wo')" id="wo-clear" style="display:none">Clear filter</span>
         </div>
       </div>
-      <div class="pod-tbl-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th onclick="podSort('wo','pod')">POD</th>
-              <th onclick="podSort('wo','total')" style="text-align:right">Total</th>
-              <th onclick="podSort('wo','over60')" style="text-align:right">60+</th>
-              <th onclick="podSort('wo','res7')" style="text-align:right">Res7+</th>
-              <th onclick="podSort('wo','resnew')" style="text-align:right">ResNew</th>
-            </tr>
-          </thead>
-          <tbody id="wo-pod-body"></tbody>
-        </table>
-      </div>
-    </div>
 
-    <!-- Work Order Details Panel -->
-    <div class="panel">
-      <div class="panel-header">
-        <div style="flex:1">
-          <div class="panel-title" id="wo-detail-title">All Work Orders</div>
-          <div class="panel-hint" id="wo-detail-pill">0 rows</div>
+      <!-- Right: Detail table -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title" id="wo-detail-title">All Work Orders</span>
+          <span class="pill" id="wo-detail-pill">— work orders</span>
         </div>
-      </div>
-      <div class="toolbar">
-        <input class="search-input" id="wo-search" placeholder="Search WO#, property…" oninput="renderWODetail()">
-      </div>
-      <div id="wo-loading" class="loading-state">
-        <div class="spinner"></div>
-        Loading work order data…
-      </div>
-      <div id="wo-error" class="error-state" style="display:none;margin:0;border-radius:0">
-        ⚠️ Error loading work order data. Check console for details.
-      </div>
-      <div id="wo-content" style="display:none">
+        <div class="toolbar">
+          <input class="search-input" id="wo-search" placeholder="Search WO#, property…" oninput="renderWODetail()">
+          <div class="chips">
+            <div class="chip on"     id="wo-f-all" onclick="setWOFilter('all')">All</div>
+            <div class="chip red"    id="wo-f-60"  onclick="setWOFilter('Over 60 Days')">60+ Days</div>
+            <div class="chip orange" id="wo-f-r7"  onclick="setWOFilter('Resident WOs Over 7 Days')">Resident 7d</div>
+            <div class="chip amber"  id="wo-f-rn"  onclick="setWOFilter('Resident WOs New')">Resident New</div>
+            <div class="chip"        id="wo-f-oth" onclick="setWOFilter('Other')">Other</div>
+          </div>
+        </div>
         <div class="tbl-wrap">
           <table>
             <thead>
@@ -521,8 +480,8 @@ tbody td { padding: 9px 14px; color: #333; }
                 <th onclick="detSort('wo','property')">Property</th>
                 <th onclick="detSort('wo','pod')">POD</th>
                 <th onclick="detSort('wo','status')">Status</th>
-                <th onclick="detSort('wo','days')" style="text-align:right">Days</th>
-                <th style="text-align:center">Tenant</th>
+                <th onclick="detSort('wo','days')">Days Open</th>
+                <th onclick="detSort('wo','tenant')">Tenant Rep.</th>
                 <th onclick="detSort('wo','category')">Category</th>
               </tr>
             </thead>
@@ -530,15 +489,14 @@ tbody td { padding: 9px 14px; color: #333; }
           </table>
         </div>
       </div>
-    </div>
 
+    </div>
   </div>
 </div>
 
-</div>
 
 <script>
-// ─── CONFIG ──────────────────────────────────────────────────────────────
+// ─── CONFIG ──────────────────────────────────────────────────────────
 const SHEET_ID = '1hrqBQNfYFurz9I9LEXegtgQxS4aWuMPKZsNsF5JEro8';
 const GIDS = {
   dqAudit:    '695079073',
@@ -577,28 +535,30 @@ function fetchGViz(gid) {
       resolve(rows);
     };
 
-    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${gid}&callback=${cb}`;
-    const script = document.createElement('script');
-    script.src = url;
-    document.head.appendChild(script);
+    const s = document.createElement('script');
+    s.onerror = () => { clearTimeout(timer); delete window[cb]; reject(new Error('Script load failed')); };
+    s.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=responseHandler:${cb}&gid=${gid}`;
+    document.head.appendChild(s);
   });
 }
 
-// ─── STATE ────────────────────────────────────────────────────────────────
-let dqRows = [];
-let woRows = [];
+// ─── STATE ───────────────────────────────────────────────────────────
+let dqRows = [], woRows = [];
 let dqPOD = null, woPOD = null;
 let dqFilter = 'all', woFilter = 'all';
-let dqPodSrt = { col: 'over60', dir: -1 };
-let woPodSrt = { col: 'over60', dir: -1 };
-let dqDetSort = { col: 'balance', dir: -1 };
-let woDetSort = { col: 'days', dir: -1 };
+let dqPodView  = '$';   // '$' = balance, '#' = tenant count
+let dqDetSort  = { col: 'balance',  dir: -1 };
+let woDetSort  = { col: 'days',     dir: -1 };
+let dqPodSrt   = { col: 'balance',  dir: -1 };
+let woPodSrt   = { col: 'over60',   dir: -1 };
 
+// ─── UTILS ───────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
-
-// ─── HELPERS ──────────────────────────────────────────────────────────────
-const fmt$ = n => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(n);
-const trunc = (s, n) => String(s || '').length > n ? String(s).slice(0, n - 1) + '…' : s;
+const fmt$ = v => {
+  const n = parseFloat(v) || 0;
+  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+const trunc = (s, n) => s && s.length > n ? s.slice(0, n) + '…' : (s || '');
 
 function daysSince(dateVal) {
   if (!dateVal) return 0;
@@ -637,18 +597,14 @@ function isEvicting(lease) {
 function showTab(t) {
   ['dq','wo'].forEach(x => {
     $('tab-' + x).style.display  = x === t ? '' : 'none';
-    const btn = document.querySelector(`.tab-btn[onclick="showTab('${x}')"]`);
-    if (btn) btn.classList.toggle('active', x === t);
+    $('tb-' + x).classList.toggle('active', x === t);
   });
 }
 
 // ─── DELINQUENCY ─────────────────────────────────────────────────────
 async function loadDQ() {
   try {
-    console.log('Loading Delinquency Audit from GID:', GIDS.dqAudit);
     const raw = await fetchGViz(GIDS.dqAudit);
-    console.log('DQ Raw data loaded:', raw.length, 'rows');
-    
     dqRows = raw.map(r => ({
       property : r['Property']           || '',
       pod      : r['POD']                || '',
@@ -660,100 +616,61 @@ async function loadDQ() {
       days60   : parseFloat(r['60+ Days']) || 0,
       lease        : r['Lease Status']        || '',
       last_pay_date: r['Last Payment Date']   || '',
-      last_pay_amt : parseFloat(r['Last Payment Amount']) || 0,
-      note         : r['Note']                || '',
-      compliance_notes: r['Compliance Notes']  || '',
-      move_out_date: r['Move Out Date']       || '',
-    }));
-
-    // Add computed fields for compliance status
-    dqRows.forEach(r => {
-      r.oc = r.lease && isOC(r.lease);
-      r.ev = isEvicting(r.lease);
-    });
+      last_pay_amt : parseFloat(r['Last Payment Amt']) || 0,
+      note             : r['Note']              || '',
+      compliance_notes : r['Compliance Notes'] || '',
+      status           : r['Compliance Status']|| '',
+      move_out_date    : r['Move Out Date']     || '',
+    })).filter(r => (r.tenant || r.property) && !/future/i.test(r.lease));
 
     $('dq-loading').style.display = 'none';
     $('dq-content').style.display = '';
     $('dq-badge').textContent = dqRows.length;
 
-    console.log('✓ DQ data loaded successfully:', dqRows.length, 'tenants');
     renderDQCards();
     renderDQPods();
     renderDQDetail();
   } catch(e) {
     $('dq-loading').style.display = 'none';
     $('dq-error').style.display   = '';
-    console.error('❌ DQ error:', e);
+    console.error('DQ error:', e);
   }
 }
 
-// ─── WORK ORDERS ─────────────────────────────────────────────────────
-async function loadWO() {
-  try {
-    console.log('Loading Work Orders from GID:', GIDS.maintenance);
-    const raw = await fetchGViz(GIDS.maintenance);
-    console.log('WO Raw data loaded:', raw.length, 'rows');
-    console.log('First WO row sample:', raw[0]);
-    
-    woRows = raw.map(r => {
-      const row = {
-        wo             : r['Work Order #'] || '',
-        property       : r['Property']     || '',
-        pod            : r['POD']          || '',
-        unit           : r['Unit']         || '',
-        category       : r['Category']     || '',
-        status         : r['Status']       || '',
-        created_date   : r['Created Date'] || '',
-        tenant_reported: r['Tenant Reported'] || '',
-      };
-      row.wo_category = woCategory(row);
-      row.days        = daysSince(row.created_date);
-      return row;
-    }).filter(r => r.wo);
-
-    $('wo-loading').style.display = 'none';
-    $('wo-content').style.display = '';
-    $('wo-badge').textContent = woRows.length;
-
-    console.log('✓ WO data loaded successfully:', woRows.length, 'work orders');
-    console.log('Sample WO rows:', woRows.slice(0, 3));
-    renderWOCards();
-    renderWOPods();
-    renderWODetail();
-  } catch(e) {
-    $('wo-loading').style.display = 'none';
-    $('wo-error').style.display   = '';
-    console.error('❌ WO error:', e);
-  }
-}
-
-// ─── DQ: RENDER ─────────────────────────────────────────────────────
 function renderDQCards() {
-  const total = dqRows.length;
-  const oc = dqRows.filter(r => r.oc).length;
-  const ev = dqRows.filter(r => r.ev).length;
-  const dqBal = dqRows.reduce((s, r) => s + r.balance, 0);
+  const total  = dqRows.length;
+  const ok     = dqRows.filter(r => !isOC(r.status)).length;
+  const oc     = dqRows.filter(r =>  isOC(r.status)).length;
+  const totBal = dqRows.reduce((s, r) => s + r.balance, 0);
+  const balEv  = dqRows.filter(r => isEvicting(r.lease)).reduce((s, r) => s + r.balance, 0);
+  const cntEv  = dqRows.filter(r => isEvicting(r.lease)).length;
+  const pct    = total ? Math.round(oc / total * 100) : 0;
 
   $('dq-cards').innerHTML = `
     <div class="card">
-      <div class="card-label">Total Tenants</div>
+      <div class="card-label">Total Delinquent</div>
       <div class="card-value">${total}</div>
-      <div class="card-sub">active leases</div>
+      <div class="card-sub">tenants tracked</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Compliant</div>
+      <div class="card-value green">${ok}</div>
+      <div class="card-sub">${total ? Math.round(ok/total*100) : 0}% of total</div>
     </div>
     <div class="card red">
-      <div class="card-label">Non-Compliant</div>
+      <div class="card-label">Out of Compliance</div>
       <div class="card-value red">${oc}</div>
-      <div class="card-sub">${total ? Math.round(oc/total*100) : 0}% of total</div>
+      <div class="card-sub">${pct}% of total</div>
+    </div>
+    <div class="card blue">
+      <div class="card-label">Total Balance</div>
+      <div class="card-value blue money">${fmt$(totBal)}</div>
+      <div class="card-sub">across all tenants</div>
     </div>
     <div class="card orange">
-      <div class="card-label">Total Balance</div>
-      <div class="card-value money">${fmt$(dqBal)}</div>
-      <div class="card-sub">delinquent amount</div>
-    </div>
-    <div class="card amber">
-      <div class="card-label">Evicting</div>
-      <div class="card-value amber">${ev}</div>
-      <div class="card-sub">${total ? Math.round(ev/total*100) : 0}% of total</div>
+      <div class="card-label">Under Eviction</div>
+      <div class="card-value orange money">${fmt$(balEv)}</div>
+      <div class="card-sub">${cntEv} tenant${cntEv !== 1 ? 's' : ''}</div>
     </div>
   `;
 }
@@ -762,55 +679,103 @@ function getDQPodStats() {
   const map = {};
   dqRows.forEach(r => {
     const p = r.pod || 'Unknown';
-    if (!map[p]) map[p] = { pod: p, total: 0, oc: 0, ev: 0, bal: 0 };
+    if (!map[p]) map[p] = { pod: p, total: 0, oc: 0, ev: 0, balance: 0, balOk: 0, balOC: 0, balEv: 0, d030: 0 };
     map[p].total++;
-    if (r.oc) map[p].oc++;
-    if (r.ev) map[p].ev++;
-    map[p].bal += r.balance;
+    map[p].balance += r.balance;
+    map[p].d030    += r.d030;
+    if (isEvicting(r.lease)) {
+      map[p].ev++;
+      map[p].balEv += r.balance;
+    } else if (isOC(r.status)) {
+      map[p].oc++;
+      map[p].balOC += r.balance;
+    } else {
+      map[p].balOk += r.balance;
+    }
   });
   return Object.values(map);
+}
+
+function setDQPodView(mode) {
+  dqPodView = mode;
+  $('dq-tog-bal').classList.toggle('active', mode === '$');
+  $('dq-tog-cnt').classList.toggle('active', mode === '#');
+  const isBal = mode === '$';
+  $('dq-th-ok').innerHTML = isBal ? '✓ Compliant $' : '✓ Compliant #';
+  $('dq-th-oc').innerHTML = isBal ? '✗ Non-Comp $'  : '✗ Non-Comp #';
+  $('dq-th-ev').innerHTML = isBal ? '⚖ Evicting $'  : '⚖ Evicting #';
+  renderDQPods();
 }
 
 function renderDQPods() {
   let pods = getDQPodStats();
   const { col, dir } = dqPodSrt;
+  const isBal = dqPodView === '$';
   pods.sort((a, b) => {
-    const v = { pod: x => x.pod, total: x => x.total, oc: x => x.oc, ev: x => x.ev };
-    const av = (v[col] || v.oc)(a), bv = (v[col] || v.oc)(b);
+    const v = { pod: x => x.pod, total: x => x.total, oc: x => x.oc, ev: x => x.ev,
+                balance: x => x.balance, balOk: x => x.balOk, balOC: x => x.balOC, balEv: x => x.balEv };
+    const av = (v[col] || v.balance)(a), bv = (v[col] || v.balance)(b);
     return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * dir;
   });
 
   $('dq-pod-pill').textContent = pods.length + ' PODs';
+  const totRow = pods.reduce((t, s) => ({
+    total: t.total + s.total, balance: t.balance + s.balance, d030: t.d030 + s.d030,
+    balOk: t.balOk + s.balOk, balOC: t.balOC + s.balOC, balEv: t.balEv + s.balEv, ev: t.ev + s.ev,
+    cntOk: t.cntOk + (s.total - s.oc - s.ev), cntOC: t.cntOC + s.oc
+  }), { total: 0, balance: 0, d030: 0, balOk: 0, balOC: 0, balEv: 0, ev: 0, cntOk: 0, cntOC: 0 });
+
+  const cntOk  = s => s.total - s.oc - s.ev;
+  const dispOk  = s => isBal ? (s.balOk > 0 ? fmt$(s.balOk) : '—') : cntOk(s);
+  const dispOC  = s => isBal ? (s.balOC > 0 ? fmt$(s.balOC) : '—') : s.oc;
+  const dispEv  = s => isBal ? (s.balEv > 0 ? fmt$(s.balEv) : '—') : s.ev;
+  const colorOk = s => isBal ? (s.balOk > 0 ? '#2e7d32' : '#aaa') : (cntOk(s) > 0 ? '#2e7d32' : '#aaa');
+  const colorOC = s => isBal ? (s.balOC > 0 ? '#c62828' : '#aaa') : (s.oc > 0 ? '#c62828' : '#aaa');
+  const colorEv = s => isBal ? (s.balEv > 0 ? '#6a1b9a' : '#aaa') : (s.ev > 0 ? '#6a1b9a' : '#aaa');
+  const boldOC  = s => (isBal ? s.balOC : s.oc) > 0 ? '700' : '400';
+  const boldEv  = s => (isBal ? s.balEv : s.ev) > 0 ? '700' : '400';
+
   $('dq-pod-body').innerHTML = pods.map(s => `
     <tr onclick="selectPOD('dq','${s.pod.replace(/'/g, "\\'")}')"
         class="${dqPOD === s.pod ? 'selected' : ''}">
       <td><strong>${s.pod}</strong></td>
-      <td style="text-align:right">${s.total}</td>
-      <td style="text-align:right;color:${s.oc > 0 ? '#c62828' : '#ccc'};font-weight:${s.oc ? '700':'400'}">${s.oc || '—'}</td>
-      <td style="text-align:right;color:${s.ev > 0 ? '#f57f17' : '#ccc'}">${s.ev || '—'}</td>
+      <td style="text-align:right;font-weight:700;font-size:12px">${fmt$(s.balance)}</td>
+      <td style="text-align:right;font-size:12px;color:${s.d030 > 0 ? '#1565c0' : '#aaa'}">${s.d030 > 0 ? fmt$(s.d030) : '—'}</td>
+      <td style="text-align:right;font-size:12px;color:${colorOk(s)}">${dispOk(s)}</td>
+      <td style="text-align:right;font-size:12px;font-weight:${boldOC(s)};color:${colorOC(s)}">${dispOC(s)}</td>
+      <td style="text-align:right;font-size:12px;font-weight:${boldEv(s)};color:${colorEv(s)}">${dispEv(s)}</td>
     </tr>
-  `).join('');
+  `).join('') + `
+    <tr style="background:#f8f8f8;border-top:2px solid #ddd;font-weight:700">
+      <td style="color:#555;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">ALL PODs</td>
+      <td style="text-align:right;font-size:12px">${fmt$(totRow.balance)}</td>
+      <td style="text-align:right;font-size:12px;color:#1565c0">${fmt$(totRow.d030)}</td>
+      <td style="text-align:right;font-size:12px;color:#2e7d32">${isBal ? fmt$(totRow.balOk) : totRow.cntOk}</td>
+      <td style="text-align:right;font-size:12px;color:#c62828">${isBal ? fmt$(totRow.balOC) : totRow.cntOC}</td>
+      <td style="text-align:right;font-size:12px;color:#6a1b9a">${isBal ? fmt$(totRow.balEv) : totRow.ev}</td>
+    </tr>
+  `;
 }
 
 function renderDQDetail() {
   const q = ($('dq-search')?.value || '').toLowerCase();
   let rows = dqRows;
   if (dqPOD) rows = rows.filter(r => r.pod === dqPOD);
-  if (dqFilter === 'ok')  rows = rows.filter(r => !r.oc && !r.ev);
-  if (dqFilter === 'nc')  rows = rows.filter(r => r.oc);
-  if (dqFilter === 'ev')  rows = rows.filter(r => r.ev);
+  if (dqFilter === 'ok') rows = rows.filter(r => r.status === "Compliant");
+  if (dqFilter === 'nc') rows = rows.filter(r => r.status === "Out of Compliance");
+  if (dqFilter === 'ev') rows = rows.filter(r => r.status === "Evicting");
   if (q) rows = rows.filter(r =>
-    (r.tenant + r.property + r.unit).toLowerCase().includes(q)
+    (r.tenant + r.property + r.unit + r.pod).toLowerCase().includes(q)
   );
 
   rows = [...rows];
   const { col, dir } = dqDetSort;
-  const key = { tenant:'tenant', property:'property', unit:'unit', balance:'balance',
-                lease:'lease', status:(r) => r.oc ? 'ooc' : 'ok', lastpay:'last_pay_date',
-                lastamt:'last_pay_amt', moveout:'move_out_date' };
+  const key = { tenant:'tenant', property:'property', unit:'unit',
+                balance:'balance', days60:'days60', lease:'lease', status:'status',
+                last_pay_date:'last_pay_date', last_pay_amt:'last_pay_amt', move_out_date:'move_out_date' };
   rows.sort((a, b) => {
-    const av = typeof key[col] === 'function' ? key[col](a) : a[key[col]];
-    const bv = typeof key[col] === 'function' ? key[col](b) : b[key[col]];
+    const k = key[col] || 'balance';
+    const av = a[k], bv = b[k];
     return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * dir;
   });
 
@@ -819,13 +784,13 @@ function renderDQDetail() {
 
   if (!rows.length) {
     $('dq-detail-body').innerHTML =
-      '<tr><td colspan="11"><div class="empty-state">No tenants match your filters</div></td></tr>';
+      '<tr><td colspan="10"><div class="empty-state">No tenants match your filters</div></td></tr>';
     return;
   }
 
   $('dq-detail-body').innerHTML = rows.map(r => {
-    const ev = isEvicting(r.lease);
-    const oc = isOC(r.lease);
+    const ev = /evict/i.test(r.lease);
+    const oc = isOC(r.status);
     const noteLines      = (r.note || '').split('\n').map(l => l.trim()).filter(Boolean);
     const lastNote       = noteLines.slice(-3).join('\n');
     const complianceNote = (r.compliance_notes || '').trim();
@@ -856,6 +821,39 @@ function setDQFilter(f) {
 }
 
 // ─── WORK ORDERS ─────────────────────────────────────────────────────
+async function loadWO() {
+  try {
+    const raw = await fetchGViz(GIDS.maintenance);
+    woRows = raw.map(r => {
+      const row = {
+        wo             : r['Work Order #'] || '',
+        property       : r['Property']     || '',
+        pod            : r['POD']          || '',
+        unit           : r['Unit']         || '',
+        category       : r['Category']     || '',
+        status         : r['Status']       || '',
+        created_date   : r['Created Date'] || '',
+        tenant_reported: r['Tenant Reported'] || '',
+      };
+      row.wo_category = woCategory(row);
+      row.days        = daysSince(row.created_date);
+      return row;
+    }).filter(r => r.wo);
+
+    $('wo-loading').style.display = 'none';
+    $('wo-content').style.display = '';
+    $('wo-badge').textContent = woRows.length;
+
+    renderWOCards();
+    renderWOPods();
+    renderWODetail();
+  } catch(e) {
+    $('wo-loading').style.display = 'none';
+    $('wo-error').style.display   = '';
+    console.error('WO error:', e);
+  }
+}
+
 function renderWOCards() {
   const total  = woRows.length;
   const over60 = woRows.filter(r => r.wo_category === 'Over 60 Days').length;
@@ -883,6 +881,11 @@ function renderWOCards() {
       <div class="card-label">Resident New</div>
       <div class="card-value amber">${resNew}</div>
       <div class="card-sub">tenant-reported</div>
+    </div>
+    <div class="card gray">
+      <div class="card-label">Other</div>
+      <div class="card-value gray">${other}</div>
+      <div class="card-sub">no priority flag</div>
     </div>
   `;
 }
@@ -916,10 +919,10 @@ function renderWOPods() {
     <tr onclick="selectPOD('wo','${s.pod.replace(/'/g, "\\'")}')"
         class="${woPOD === s.pod ? 'selected' : ''}">
       <td><strong>${s.pod}</strong></td>
-      <td style="text-align:right">${s.total}</td>
-      <td style="text-align:right;color:${s.over60 > 0 ? '#c62828' : '#ccc'};font-weight:${s.over60 ? '700':'400'}">${s.over60 || '—'}</td>
-      <td style="text-align:right;color:${s.res7   > 0 ? '#e65100' : '#ccc'}">${s.res7   || '—'}</td>
-      <td style="text-align:right;color:${s.resNew > 0 ? '#f57f17' : '#ccc'}">${s.resNew || '—'}</td>
+      <td>${s.total}</td>
+      <td style="color:${s.over60 > 0 ? '#c62828' : '#ccc'};font-weight:${s.over60 ? '700':'400'}">${s.over60 || '—'}</td>
+      <td style="color:${s.res7   > 0 ? '#e65100' : '#ccc'}">${s.res7   || '—'}</td>
+      <td style="color:${s.resNew > 0 ? '#f57f17' : '#ccc'}">${s.resNew || '—'}</td>
     </tr>
   `).join('');
 }
@@ -966,7 +969,7 @@ function renderWODetail() {
         <td title="${r.property}" style="font-size:12px;color:#444">${trunc(r.property, 20)}</td>
         <td style="font-size:11px;color:#888">${trunc(r.pod, 16)}</td>
         <td><span style="font-size:11px;color:#555">${r.status}</span></td>
-        <td style="text-align:right;font-weight:700;color:${dayColor(r.days)}">${r.days}d</td>
+        <td style="font-weight:700;color:${dayColor(r.days)}">${r.days}d</td>
         <td style="text-align:center;font-size:14px">${tenYes ? '<span style="color:#006140">✓</span>' : '<span style="color:#ddd">—</span>'}</td>
         <td><span class="badge ${catBadge[r.wo_category] || 'b-oth'}">${catLabel[r.wo_category] || r.wo_category}</span></td>
       </tr>
@@ -1030,119 +1033,40 @@ function detSort(tab, col) {
   }
 }
 
-// ─── REFRESH BUTTON HANDLER ───────────────────────────────────────────
-const CLOUD_FUNCTION_URL = 'https://us-central1-appfolio-dashboard-491122.cloudfunctions.net/sync_appfolio_data';
-
-// Perform the actual sync operation
-async function performSync() {
-  try {
-    const response = await fetch(CLOUD_FUNCTION_URL, { method: 'POST' });
-    const result = await response.json();
-
-    if (response.ok) {
-      console.log('✓ Auto-sync completed at', new Date().toLocaleString());
-      return true;
-    } else {
-      console.error('Auto-sync failed:', result);
-      return false;
-    }
-  } catch (error) {
-    console.error('Auto-sync network error:', error);
-    return false;
-  }
-}
-
-function setupRefreshButton() {
-  const btn = $('refreshBtn');
-  if (!btn) return;
-
-  btn.addEventListener('click', async function() {
-    const originalText = btn.innerHTML;
-    const icon = $('refreshBtnIcon');
-
-    btn.disabled = true;
-    btn.classList.remove('success', 'error');
-    icon.textContent = '⟳';
-    icon.style.animation = 'spin 1s linear infinite';
-
-    try {
-      // If Cloud Function URL not configured, show helpful message
-      if (CLOUD_FUNCTION_URL.includes('YOUR-PROJECT-ID')) {
-        btn.textContent = '⚠️ Configure Cloud Function';
-        btn.classList.add('error');
-        setTimeout(() => {
-          btn.innerHTML = originalText;
-          btn.disabled = false;
-        }, 3000);
-        return;
-      }
-
-      const success = await performSync();
-
-      if (success) {
-        btn.textContent = '✓ Synced!';
-        btn.classList.add('success');
-
-        // Reload dashboard data after 2 seconds
-        setTimeout(() => {
-          location.reload();
-        }, 1500);
-      } else {
-        btn.textContent = '❌ Sync failed';
-        btn.classList.add('error');
-
-        setTimeout(() => {
-          btn.innerHTML = originalText;
-          btn.disabled = false;
-        }, 3000);
-      }
-    } catch (error) {
-      btn.textContent = '❌ Network error';
-      btn.classList.add('error');
-      console.error('Request error:', error);
-
-      setTimeout(() => {
-        btn.innerHTML = originalText;
-        btn.disabled = false;
-      }, 3000);
-    }
-  });
-}
-
-// Auto-refresh every hour (3600000 milliseconds)
-function setupAutoRefresh() {
-  const ONE_HOUR_MS = 3600000;
-
-  // Run sync immediately on first load
-  performSync();
-
-  // Then run every hour
-  setInterval(() => {
-    performSync();
-  }, ONE_HOUR_MS);
-
-  console.log('✓ Auto-refresh scheduled every 60 minutes');
-}
-
-// Add CSS animation for spinning icon
-const style = document.createElement('style');
-style.textContent = `
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
-`;
-document.head.appendChild(style);
-
 // ─── INIT ─────────────────────────────────────────────────────────────
 (async () => {
-  console.log('📊 Dashboard initializing...');
-  setupRefreshButton();
-  setupAutoRefresh();
   $('lastUpdated').textContent = 'Refreshed ' + new Date().toLocaleString('en-US',
     { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
+
+  // h functionality
+  const CLOUD_FUNCTION_URL = 'https://us-central1-appfolio-dashboard-491122.cloudfunctions.net/sync_appfolio_data';
+  const refreshBtn = document.getElementById('refreshBtn');
+  if (refreshBtn) {
+      refreshBtn.addEventListener('click', async function() {
+            const originalText = refreshBtn.textContent;
+            refreshBtn.textContent = '⟳ Syncing...';
+            refreshBtn.disabled = true;
+            try {
+                    const response = await fetch(CLOUD_FUNCTION_URL, { method: 'POST' });
+                    const result = await response.json();
+                    if (response.ok) {
+                              refreshBtn.textContent = '✓ Synced!';
+                              setTimeout(() => { location.reload(); }, 1000);
+                    } else {
+                              refreshBtn.textContent = '❌ Sync failed';
+                              console.error('Sync error:', result);
+                    }
+            } catch (error) {
+                    refreshBtn.textContent = '❌ Error';
+                    console.error('Request error:', error);
+            }
+            setTimeout(() => {
+                    refreshBtn.textContent = originalText;
+                    refreshBtn.disabled = false;
+            }, 3000);
+      });
+  }
   await Promise.all([loadDQ(), loadWO()]);
-  console.log('✓ Dashboard loaded complete');
 })();
 </script>
 </body>
