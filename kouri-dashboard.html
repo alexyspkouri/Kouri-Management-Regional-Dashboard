@@ -784,9 +784,9 @@ async function loadWO() {
         pod            : r['C'] || '',  // POD
         unit           : r['D'] || '',  // Unit
         category       : r['E'] || '',  // Category
-        status         : r['H'] || '',  // Status (column H)
-        created_date   : r['J'] || '',  // Created Date (column J)
-        tenant_reported: r['N'] || '',  // Tenant Reported (column N)
+        status         : r['F'] || '',  // Status (column F — updated)
+        created_date   : r['G'] || '',  // Created Date (column G — updated)
+        tenant_reported: r['H'] || '',  // Tenant Reported (column H — updated)
       };
       row.wo_category = woCategory(row);
       row.days        = daysSince(row.created_date);
