@@ -780,14 +780,15 @@ async function loadWO() {
 
     woRows = dataRows.map(r => {
       const row = {
-        wo             : r['Work Order #'] || '',
-        property       : r['Property'] || '',
-        pod            : r['POD'] || '',
-        unit           : r['Unit'] || '',
-        category       : r['Category'] || '',
-        status         : r['Status'] || '',
-        created_date   : r['Created Date'] || '',
-        tenant_reported: r['Tenant Reported'] || '',
+        wo                    : r['Work Order #'] || '',
+        property              : r['Property'] || '',
+        pod                   : r['POD'] || '',
+        unit                  : r['Unit'] || '',
+        category              : r['Category'] || '',
+        status                : r['Status'] || '',
+        created_date          : r['Created Date'] || '',
+        tenant_reported       : r['Tenant Reported'] || '',
+        service_request_desc  : r['Service Request Description'] || '',
       };
       row.wo_category = woCategory(row);
       row.days        = daysSince(row.created_date);
@@ -962,7 +963,6 @@ function renderWODetail() {
                      'Resident WOs New':'Res New', 'Other':'Other' };
   const dayColor = d => d > 60 ? '#c62828' : d > 30 ? '#e65100' : d > 7 ? '#f57f17' : '#555';
   $('wo-detail-body').innerHTML = rows.map(r => {
-    const tenYes = r.tenant_reported?.trim().toLowerCase() === 'yes';
     return `
       <tr>
         <td><strong style="font-size:12px">${r.wo}</strong></td>
@@ -970,7 +970,7 @@ function renderWODetail() {
         <td style="font-size:11px;color:#888">${trunc(r.pod, 16)}</td>
         <td><span style="font-size:11px;color:#555">${r.status}</span></td>
         <td style="font-weight:700;color:${dayColor(r.days)}">${r.days}d</td>
-        <td style="text-align:center;font-size:14px">${tenYes ? '<span style="color:#006140">✓</span>' : '<span style="color:#ddd">—</span>'}</td>
+        <td style="font-size:11px;color:#666;max-width:250px" title="${r.service_request_desc}">${trunc(r.service_request_desc, 30)}</td>
         <td><span class="badge ${catBadge[r.wo_category] || 'b-oth'}">${catLabel[r.wo_category] || r.wo_category}</span></td>
       </tr>
     `;
