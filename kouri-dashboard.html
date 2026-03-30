@@ -1038,7 +1038,7 @@ function detSort(tab, col) {
   $('lastUpdated').textContent = 'Refreshed ' + new Date().toLocaleString('en-US',
     { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
 
-  // Refresh button functionality
+  // h functionality
   const CLOUD_FUNCTION_URL = 'https://us-central1-appfolio-dashboard-491122.cloudfunctions.net/sync_appfolio_data';
   const refreshBtn = document.getElementById('refreshBtn');
   if (refreshBtn) {
