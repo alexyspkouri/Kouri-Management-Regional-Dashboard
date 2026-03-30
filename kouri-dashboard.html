@@ -779,14 +779,14 @@ async function loadWO() {
 
     woRows = dataRows.map(r => {
       const row = {
-        wo             : r['A'] || '',  // Work Order #
-        property       : r['B'] || '',  // Property
-        pod            : r['C'] || '',  // POD
-        unit           : r['D'] || '',  // Unit
-        category       : r['E'] || '',  // Category
-        status         : r['F'] || '',  // Status (column F — updated)
-        created_date   : r['G'] || '',  // Created Date (column G — updated)
-        tenant_reported: r['H'] || '',  // Tenant Reported (column H — updated)
+        wo             : r['Work Order #'] || '',
+        property       : r['Property'] || '',
+        pod            : r['POD'] || '',
+        unit           : r['Unit'] || '',
+        category       : r['Category'] || '',
+        status         : r['Status'] || '',
+        created_date   : r['Created Date'] || '',
+        tenant_reported: r['Tenant Reported'] || '',
       };
       row.wo_category = woCategory(row);
       row.days        = daysSince(row.created_date);
