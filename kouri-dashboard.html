@@ -765,23 +765,28 @@ async function loadWO() {
     const raw = await fetchGViz(GIDS.maintenance);
     console.log('📊 WO Raw data returned:', raw.length, 'rows');
 
-    if (raw.length > 0) {
-      console.log('🔍 First row column names:', Object.keys(raw[0]));
-      console.log('📝 First row sample data:', raw[0]);
-    } else {
+    if (raw.length === 0) {
       console.warn('⚠️ No rows returned from Google Sheet');
+      throw new Error('No data returned from Google Sheet');
     }
 
-    woRows = raw.map(r => {
+    // First row contains headers, skip it and use the remaining rows
+    const dataRows = raw.slice(1);
+    console.log('📝 Data rows (excluding header):', dataRows.length);
+    if (dataRows.length > 0) {
+      console.log('🔍 Sample data row:', dataRows[0]);
+    }
+
+    woRows = dataRows.map(r => {
       const row = {
-        wo             : r['Work Order #'] || '',
-        property       : r['Property']     || '',
-        pod            : r['POD']          || '',
-        unit           : r['Unit']         || '',
-        category       : r['Category']     || '',
-        status         : r['Status']       || '',
-        created_date   : r['Created Date'] || '',
-        tenant_reported: r['Tenant Reported'] || '',
+        wo             : r['A'] || '',  // Work Order #
+        property       : r['B'] || '',  // Property
+        pod            : r['C'] || '',  // POD
+        unit           : r['D'] || '',  // Unit
+        category       : r['E'] || '',  // Category
+        status         : r['H'] || '',  // Status (column H)
+        created_date   : r['J'] || '',  // Created Date (column J)
+        tenant_reported: r['N'] || '',  // Tenant Reported (column N)
       };
       row.wo_category = woCategory(row);
       row.days        = daysSince(row.created_date);
@@ -792,7 +797,7 @@ async function loadWO() {
     if (woRows.length > 0) {
       console.log('📋 Sample mapped rows:', woRows.slice(0, 3));
     } else {
-      console.warn('⚠️ All rows were filtered out - check if "Work Order #" field is empty or column name mismatch');
+      console.warn('⚠️ All rows were filtered out - check WO # values');
     }
 
     $('wo-loading').style.display = 'none';
