@@ -811,6 +811,7 @@ async function loadWO() {
         resNew: parseInt(r['Resident WOs New']) || 0
       }));
       console.log('📊 WO Summary loaded:', woSummaryRows.length, 'PODs');
+      console.log('📋 PODs loaded:', woSummaryRows.map(s => s.pod));
     } catch(e) {
       console.warn('⚠️ Could not load WO Summary, will calculate locally:', e);
       woSummaryRows = [];
