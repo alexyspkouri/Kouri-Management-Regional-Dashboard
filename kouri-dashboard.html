@@ -804,12 +804,12 @@ async function loadWO() {
     // Load WO Summary data from the summary tab
     try {
       const summaryRaw = await fetchGViz(GIDS.woSummary);
-      woSummaryRows = summaryRaw.slice(1).map(r => ({
+      woSummaryRows = summaryRaw.map(r => ({
         pod: r['Property Group'] || '',
         over60: parseInt(r['WOs Over 60 Days']) || 0,
         res7: parseInt(r['Resident WOs Over 7 Days']) || 0,
         resNew: parseInt(r['Resident WOs New']) || 0
-      }));
+      })).filter(r => r.pod);  // Filter out empty rows
       console.log('📊 WO Summary loaded:', woSummaryRows.length, 'PODs');
       console.log('📋 PODs loaded:', woSummaryRows.map(s => s.pod));
     } catch(e) {
