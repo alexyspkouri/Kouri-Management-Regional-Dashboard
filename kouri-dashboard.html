@@ -1,4 +1,4 @@
-l<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -290,6 +290,28 @@ tbody td { padding: 9px 14px; color: #333; }
   color: white;
 }
 .view-toggle span:hover:not(.active) { background: #f0f0f0; }
+
+/* ─── Refresh Button ─── */
+#refreshBtn {
+  padding: 9px 16px;
+  background: #0066cc;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  transition: background 0.2s, transform 0.1s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+#refreshBtn:hover { background: #0052a3; }
+#refreshBtn:active { transform: scale(0.98); }
+#refreshBtn:disabled { background: #ccc; cursor: not-allowed; opacity: 0.7; }
+#refreshBtn.success { background: #2e7d32; }
+#refreshBtn.error { background: #c62828; }
 </style>
 </head>
 <body>
@@ -1033,39 +1055,116 @@ function detSort(tab, col) {
   }
 }
 
+// ─── REFRESH BUTTON HANDLER ───────────────────────────────────────────
+const CLOUD_FUNCTION_URL = 'https://us-central1-appfolio-dashboard-491122.cloudfunctions.net/sync_appfolio_data';
+
+// Perform the actual sync operation
+async function performSync() {
+  try {
+    const response = await fetch(CLOUD_FUNCTION_URL, { method: 'POST' });
+    const result = await response.json();
+
+    if (response.ok) {
+      console.log('✓ Auto-sync completed at', new Date().toLocaleString());
+      return true;
+    } else {
+      console.error('Auto-sync failed:', result);
+      return false;
+    }
+  } catch (error) {
+    console.error('Auto-sync network error:', error);
+    return false;
+  }
+}
+
+function setupRefreshButton() {
+  const btn = $('refreshBtn');
+  if (!btn) return;
+
+  btn.addEventListener('click', async function() {
+    const originalText = btn.innerHTML;
+    const icon = $('refreshBtnIcon');
+
+    btn.disabled = true;
+    btn.classList.remove('success', 'error');
+    icon.textContent = '⟳ ';
+    icon.style.animation = 'spin 1s linear infinite';
+
+    try {
+      // If Cloud Function URL not configured, show helpful message
+      if (CLOUD_FUNCTION_URL.includes('YOUR-PROJECT-ID')) {
+        btn.textContent = '⚠️ Configure Cloud Function';
+        btn.classList.add('error');
+        setTimeout(() => {
+          btn.innerHTML = originalText;
+          btn.disabled = false;
+        }, 3000);
+        return;
+      }
+
+      const success = await performSync();
+
+      if (success) {
+        btn.textContent = '✓ Synced!';
+        btn.classList.add('success');
+
+        // Reload dashboard data after 2 seconds
+        setTimeout(() => {
+          location.reload();
+        }, 1500);
+      } else {
+        btn.textContent = '❌ Sync failed';
+        btn.classList.add('error');
+
+        setTimeout(() => {
+          btn.innerHTML = originalText;
+          btn.disabled = false;
+        }, 3000);
+      }
+    } catch (error) {
+      btn.textContent = '❌ Network error';
+      btn.classList.add('error');
+      console.error('Request error:', error);
+
+      setTimeout(() => {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+      }, 3000);
+    }
+  });
+}
+
+// Auto-refresh every hour (3600000 milliseconds)
+function setupAutoRefresh() {
+  const ONE_HOUR_MS = 3600000;
+
+  // Run sync immediately on first load
+  performSync();
+
+  // Then run every hour
+  setInterval(() => {
+    performSync();
+  }, ONE_HOUR_MS);
+
+  console.log('✓ Auto-refresh scheduled every 60 minutes');
+}
+
+// Add CSS animation for spinning icon
+const style = document.createElement('style');
+style.textContent = `
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+`;
+document.head.appendChild(style);
+
 // ─── INIT ─────────────────────────────────────────────────────────────
 (async () => {
+  setupRefreshButton();
+  setupAutoRefresh();
   $('lastUpdated').textContent = 'Refreshed ' + new Date().toLocaleString('en-US',
     { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
-
-  // h functionality
-  const CLOUD_FUNCTION_URL = 'https://us-central1-appfolio-dashboard-491122.cloudfunctions.net/sync_appfolio_data';
-  const refreshBtn = document.getElementById('refreshBtn');
-  if (refreshBtn) {
-      refreshBtn.addEventListener('click', async function() {
-            const originalText = refreshBtn.textContent;
-            refreshBtn.textContent = '⟳ Syncing...';
-            refreshBtn.disabled = true;
-            try {
-                    const response = await fetch(CLOUD_FUNCTION_URL, { method: 'POST' });
-                    const result = await response.json();
-                    if (response.ok) {
-                              refreshBtn.textContent = '✓ Synced!';
-                              setTimeout(() => { location.reload(); }, 1000);
-                    } else {
-                              refreshBtn.textContent = '❌ Sync failed';
-                              console.error('Sync error:', result);
-                    }
-            } catch (error) {
-                    refreshBtn.textContent = '❌ Error';
-                    console.error('Request error:', error);
-            }
-            setTimeout(() => {
-                    refreshBtn.textContent = originalText;
-                    refreshBtn.disabled = false;
-            }, 3000);
-      });
-  }
   await Promise.all([loadDQ(), loadWO()]);
 })();
 </script>
