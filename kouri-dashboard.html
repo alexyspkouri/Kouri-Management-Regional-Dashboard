@@ -1032,6 +1032,35 @@ function detSort(tab, col) {
 (async () => {
   $('lastUpdated').textContent = 'Refreshed ' + new Date().toLocaleString('en-US',
     { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
+
+  // Refresh button functionality
+  const CLOUD_FUNCTION_URL = 'https://us-central1-appfolio-dashboard-491122.cloudfunctions.net/sync_appfolio_data';
+  const refreshBtn = document.getElementById('refreshBtn');
+  if (refreshBtn) {
+      refreshBtn.addEventListener('click', async function() {
+            const originalText = refreshBtn.textContent;
+            refreshBtn.textContent = '⟳ Syncing...';
+            refreshBtn.disabled = true;
+            try {
+                    const response = await fetch(CLOUD_FUNCTION_URL, { method: 'POST' });
+                    const result = await response.json();
+                    if (response.ok) {
+                              refreshBtn.textContent = '✓ Synced!';
+                              setTimeout(() => { location.reload(); }, 1000);
+                    } else {
+                              refreshBtn.textContent = '❌ Sync failed';
+                              console.error('Sync error:', result);
+                    }
+            } catch (error) {
+                    refreshBtn.textContent = '❌ Error';
+                    console.error('Request error:', error);
+            }
+            setTimeout(() => {
+                    refreshBtn.textContent = originalText;
+                    refreshBtn.disabled = false;
+            }, 3000);
+      });
+  }
   await Promise.all([loadDQ(), loadWO()]);
 })();
 </script>
