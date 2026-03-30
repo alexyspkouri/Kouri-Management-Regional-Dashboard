@@ -467,8 +467,9 @@ tbody td { padding: 9px 14px; color: #333; }
 // ─── CONFIG ──────────────────────────────────────────────────────────
 const SHEET_ID = '1hrqBQNfYFurz9I9LEXegtgQxS4aWuMPKZsNsF5JEro8';
 const GIDS = {
-  dqAudit:    '695079073',
-  maintenance: '469847885'
+  dqAudit:     '695079073',
+  maintenance: '469847885',
+  woSummary:   '300749393'
 };
 // ─── JSONP DATA FETCH (works from file:// — no CORS needed) ──────────
 let _cbSeq = 0;
@@ -506,7 +507,7 @@ function fetchGViz(gid) {
   });
 }
 // ─── STATE ───────────────────────────────────────────────────────────
-let dqRows = [], woRows = [];
+let dqRows = [], woRows = [], woSummaryRows = [];
 let dqPOD = null, woPOD = null;
 let dqFilter = 'all', woFilter = 'all';
 let dqPodView  = '$';   // '$' = balance, '#' = tenant count
@@ -800,6 +801,21 @@ async function loadWO() {
       console.warn('⚠️ All rows were filtered out - check WO # values');
     }
 
+    // Load WO Summary data from the summary tab
+    try {
+      const summaryRaw = await fetchGViz(GIDS.woSummary);
+      woSummaryRows = summaryRaw.slice(1).map(r => ({
+        pod: r['Property Group'] || '',
+        over60: parseInt(r['WOs Over 60 Days']) || 0,
+        res7: parseInt(r['Resident WOs Over 7 Days']) || 0,
+        resNew: parseInt(r['Resident WOs New']) || 0
+      }));
+      console.log('📊 WO Summary loaded:', woSummaryRows.length, 'PODs');
+    } catch(e) {
+      console.warn('⚠️ Could not load WO Summary, will calculate locally:', e);
+      woSummaryRows = [];
+    }
+
     $('wo-loading').style.display = 'none';
     $('wo-content').style.display = '';
     $('wo-badge').textContent = woRows.length;
@@ -813,11 +829,23 @@ async function loadWO() {
   }
 }
 function renderWOCards() {
-  const total  = woRows.length;
-  const over60 = woRows.filter(r => r.wo_category === 'Over 60 Days').length;
-  const res7   = woRows.filter(r => r.wo_category === 'Resident WOs Over 7 Days').length;
-  const resNew = woRows.filter(r => r.wo_category === 'Resident WOs New').length;
-  const other  = woRows.filter(r => r.wo_category === 'Other').length;
+  let total, over60, res7, resNew, other;
+
+  // Use WO Summary data if available (pre-calculated on server)
+  if (woSummaryRows && woSummaryRows.length > 0) {
+    over60 = woSummaryRows.reduce((s, r) => s + r.over60, 0);
+    res7   = woSummaryRows.reduce((s, r) => s + r.res7, 0);
+    resNew = woSummaryRows.reduce((s, r) => s + r.resNew, 0);
+    total  = woRows.length;  // Total from all work orders
+    other  = total - over60 - res7 - resNew;
+  } else {
+    // Fallback: calculate from work order rows
+    total  = woRows.length;
+    over60 = woRows.filter(r => r.wo_category === 'Over 60 Days').length;
+    res7   = woRows.filter(r => r.wo_category === 'Resident WOs Over 7 Days').length;
+    resNew = woRows.filter(r => r.wo_category === 'Resident WOs New').length;
+    other  = woRows.filter(r => r.wo_category === 'Other').length;
+  }
   $('wo-cards').innerHTML = `
     <div class="card">
       <div class="card-label">Total Work Orders</div>
@@ -847,6 +875,18 @@ function renderWOCards() {
   `;
 }
 function getWOPodStats() {
+  // If WO Summary data is available, use it directly (already calculated on server)
+  if (woSummaryRows && woSummaryRows.length > 0) {
+    return woSummaryRows.map(s => ({
+      pod: s.pod,
+      total: s.over60 + s.res7 + s.resNew,  // Approximate total
+      over60: s.over60,
+      res7: s.res7,
+      resNew: s.resNew
+    }));
+  }
+
+  // Fallback: calculate locally from work order rows
   const map = {};
   woRows.forEach(r => {
     const p = r.pod || 'Unknown';
