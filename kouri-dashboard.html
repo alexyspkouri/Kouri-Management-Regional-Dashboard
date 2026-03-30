@@ -540,8 +540,8 @@ function woCategory(row) {
   const ten   = (row.tenant_reported || '').trim() === 'Resident';
   const stat  = (row.status || '').trim().toLowerCase();
   if (days >= 60) return 'Over 60 Days';
+  if (ten && days >= 7 && !(stat === 'new' || stat === 'new by appfolio')) return 'Resident WOs Over 7 Days';
   if (ten && (stat === 'new' || stat === 'new by appfolio')) return 'Resident WOs New';
-  if (ten && days >= 7) return 'Resident WOs Over 7 Days';
   return 'Other';
 }
 function isOC(status) {
@@ -925,7 +925,18 @@ function renderWODetail() {
   const q = ($('wo-search')?.value || '').toLowerCase();
   let rows = woRows;
   if (woPOD)              rows = rows.filter(r => r.pod === woPOD);
-  if (woFilter !== 'all') rows = rows.filter(r => r.wo_category === woFilter);
+  if (woFilter !== 'all') {
+    rows = rows.filter(r => {
+      const days = daysSince(r.created_date);
+      const ten = (r.tenant_reported || '').trim() === 'Resident';
+      const stat = (r.status || '').trim().toLowerCase();
+      if (woFilter === 'Over 60 Days') return days >= 60;
+      if (woFilter === 'Resident WOs Over 7 Days') return ten && days >= 7;
+      if (woFilter === 'Resident WOs New') return ten && (stat === 'new' || stat === 'new by appfolio');
+      if (woFilter === 'Other') return !days >= 60 && !(ten && days >= 7) && !(ten && (stat === 'new' || stat === 'new by appfolio'));
+      return true;
+    });
+  }
   if (q) rows = rows.filter(r =>
     (r.wo + r.property + r.pod + r.status).toLowerCase().includes(q)
   );
