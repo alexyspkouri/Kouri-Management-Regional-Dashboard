@@ -7,14 +7,12 @@
 <!-- No external scripts needed — uses Google's built-in JSONP gviz endpoint -->
 <style>
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: #f0f2f5;
   color: #1a1a2e;
   min-height: 100vh;
 }
-
 /* ─── Header ─── */
 .header {
   background: #006140;
@@ -38,7 +36,6 @@ body {
 .header-title { font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }
 .header-sub { font-size: 11px; opacity: 0.75; margin-top: 1px; }
 .header-meta { font-size: 11px; opacity: 0.7; text-align: right; }
-
 /* ─── Tabs ─── */
 .tab-bar {
   background: white;
@@ -70,10 +67,8 @@ body {
   border-radius: 10px;
 }
 .tab-btn.active .tab-badge { background: #006140; color: white; }
-
 /* ─── Content ─── */
 .content { padding: 22px 28px; max-width: 1700px; margin: 0 auto; }
-
 /* ─── Cards ─── */
 .cards {
   display: grid;
@@ -105,7 +100,6 @@ body {
 .card-value.gray   { color: #555; }
 .card-value.money  { font-size: 20px; }
 .card-sub { font-size: 11px; color: #aaa; margin-top: 3px; }
-
 /* ─── Two-panel layout ─── */
 .panels {
   display: grid;
@@ -116,7 +110,6 @@ body {
 @media (max-width: 960px) {
   .panels { grid-template-columns: 1fr; }
 }
-
 /* ─── Panel ─── */
 .panel {
   background: white;
@@ -142,7 +135,6 @@ body {
   border-radius: 12px;
   font-weight: 600;
 }
-
 /* ─── Toolbar ─── */
 .toolbar {
   padding: 10px 16px;
@@ -182,11 +174,9 @@ body {
 .chip.on.red    { background: #c62828; border-color: #c62828; }
 .chip.on.orange { background: #e65100; border-color: #e65100; }
 .chip.on.amber  { background: #f57f17; border-color: #f57f17; }
-
 /* ─── Tables ─── */
 .tbl-wrap { overflow-x: auto; overflow-y: auto; max-height: 480px; }
 .pod-tbl-wrap { overflow-x: auto; overflow-y: auto; max-height: 540px; }
-
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 thead th {
   background: #f7f8fa;
@@ -207,7 +197,6 @@ thead th {
 thead th:hover { background: #eef2ef; color: #006140; }
 thead th.asc::after  { content: ' ↑'; color: #006140; }
 thead th.desc::after { content: ' ↓'; color: #006140; }
-
 tbody tr {
   border-bottom: 1px solid #f2f2f2;
   transition: background 0.1s;
@@ -217,7 +206,6 @@ tbody tr:hover    { background: #f5faf7; }
 tbody tr.selected { background: #e6f4ed !important; }
 tbody tr.selected td { font-weight: 500; }
 tbody td { padding: 9px 14px; color: #333; }
-
 /* ─── Badges ─── */
 .badge {
   display: inline-block;
@@ -235,7 +223,6 @@ tbody td { padding: 9px 14px; color: #333; }
 .b-r7   { background: #fff3e0; color: #e65100; }
 .b-rn   { background: #fff8e1; color: #f57f17; }
 .b-oth  { background: #f3f4f6; color: #6b7280; }
-
 /* ─── States ─── */
 .loading-state, .empty-state, .error-state {
   padding: 44px 20px;
@@ -260,7 +247,6 @@ tbody td { padding: 9px 14px; color: #333; }
   margin-bottom: 10px;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
-
 .clear-btn {
   font-size: 11px;
   color: #006140;
@@ -293,7 +279,6 @@ tbody td { padding: 9px 14px; color: #333; }
 </style>
 </head>
 <body>
-
 <!-- Header -->
 <div class="header">
   <div class="header-brand">
@@ -310,7 +295,6 @@ tbody td { padding: 9px 14px; color: #333; }
     </button>
   </div>
 </div>
-
 <!-- Tabs -->
 <div class="tab-bar">
   <div class="tab-btn active" id="tb-dq" onclick="showTab('dq')">
@@ -322,25 +306,20 @@ tbody td { padding: 9px 14px; color: #333; }
     <span class="tab-badge" id="wo-badge">—</span>
   </div>
 </div>
-
 <!-- ═══════════════════ DQ TAB ═══════════════════ -->
 <div id="tab-dq" class="content">
   <div class="error-state" id="dq-error" style="display:none">
     ⚠️ <strong>Could not load delinquency data.</strong><br><br>
     To fix this, open the Google Sheet → Share → Change access to <strong>"Anyone on the internet with this link → Viewer"</strong>, then refresh this page.
   </div>
-
   <div id="dq-loading" class="loading-state">
     <div class="spinner"></div><br>Loading delinquency data…
   </div>
-
   <div id="dq-content" style="display:none">
     <!-- Summary Cards -->
     <div class="cards" id="dq-cards"></div>
-
     <!-- Two Panels -->
     <div class="panels">
-
       <!-- Left: POD table -->
       <div class="panel">
         <div class="panel-header">
@@ -370,7 +349,6 @@ tbody td { padding: 9px 14px; color: #333; }
           <span class="clear-btn" onclick="clearPOD('dq')" id="dq-clear" style="display:none">Clear filter</span>
         </div>
       </div>
-
       <!-- Right: Detail table -->
       <div class="panel">
         <div class="panel-header">
@@ -407,29 +385,23 @@ tbody td { padding: 9px 14px; color: #333; }
           </table>
         </div>
       </div>
-
     </div>
   </div>
 </div>
-
 <!-- ═══════════════════ WO TAB ═══════════════════ -->
 <div id="tab-wo" class="content" style="display:none">
   <div class="error-state" id="wo-error" style="display:none">
     ⚠️ <strong>Could not load work order data.</strong><br><br>
     To fix this, open the Google Sheet → Share → Change access to <strong>"Anyone on the internet with this link → Viewer"</strong>, then refresh this page.
   </div>
-
   <div id="wo-loading" class="loading-state">
     <div class="spinner"></div><br>Loading work order data…
   </div>
-
   <div id="wo-content" style="display:none">
     <!-- Summary Cards -->
     <div class="cards" id="wo-cards"></div>
-
     <!-- Two Panels -->
     <div class="panels">
-
       <!-- Left: POD table -->
       <div class="panel">
         <div class="panel-header">
@@ -455,7 +427,6 @@ tbody td { padding: 9px 14px; color: #333; }
           <span class="clear-btn" onclick="clearPOD('wo')" id="wo-clear" style="display:none">Clear filter</span>
         </div>
       </div>
-
       <!-- Right: Detail table -->
       <div class="panel">
         <div class="panel-header">
@@ -489,12 +460,9 @@ tbody td { padding: 9px 14px; color: #333; }
           </table>
         </div>
       </div>
-
     </div>
   </div>
 </div>
-
-
 <script>
 // ─── CONFIG ──────────────────────────────────────────────────────────
 const SHEET_ID = '1hrqBQNfYFurz9I9LEXegtgQxS4aWuMPKZsNsF5JEro8';
@@ -502,10 +470,8 @@ const GIDS = {
   dqAudit:    '695079073',
   maintenance: '469847885'
 };
-
 // ─── JSONP DATA FETCH (works from file:// — no CORS needed) ──────────
 let _cbSeq = 0;
-
 function fetchGViz(gid) {
   return new Promise((resolve, reject) => {
     const cb = '_gviz' + (++_cbSeq);
@@ -513,7 +479,6 @@ function fetchGViz(gid) {
       delete window[cb];
       reject(new Error('Timeout — check your internet connection'));
     }, 20000);
-
     window[cb] = function(resp) {
       clearTimeout(timer);
       delete window[cb];
@@ -534,14 +499,12 @@ function fetchGViz(gid) {
       });
       resolve(rows);
     };
-
     const s = document.createElement('script');
     s.onerror = () => { clearTimeout(timer); delete window[cb]; reject(new Error('Script load failed')); };
     s.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=responseHandler:${cb}&gid=${gid}`;
     document.head.appendChild(s);
   });
 }
-
 // ─── STATE ───────────────────────────────────────────────────────────
 let dqRows = [], woRows = [];
 let dqPOD = null, woPOD = null;
@@ -551,7 +514,6 @@ let dqDetSort  = { col: 'balance',  dir: -1 };
 let woDetSort  = { col: 'days',     dir: -1 };
 let dqPodSrt   = { col: 'balance',  dir: -1 };
 let woPodSrt   = { col: 'over60',   dir: -1 };
-
 // ─── UTILS ───────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 const fmt$ = v => {
@@ -559,7 +521,6 @@ const fmt$ = v => {
   return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 const trunc = (s, n) => s && s.length > n ? s.slice(0, n) + '…' : (s || '');
-
 function daysSince(dateVal) {
   if (!dateVal) return 0;
   // GViz may return a JS Date object directly, or a string
@@ -567,14 +528,12 @@ function daysSince(dateVal) {
   if (isNaN(d)) return 0;
   return Math.floor((Date.now() - d) / 86400000);
 }
-
 function fmtDate(dateVal) {
   if (!dateVal) return '';
   const d = dateVal instanceof Date ? dateVal : new Date(dateVal);
   if (isNaN(d)) return String(dateVal);
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
-
 function woCategory(row) {
   const days  = daysSince(row.created_date);
   const ten   = (row.tenant_reported || '').trim().toLowerCase() === 'yes';
@@ -584,15 +543,12 @@ function woCategory(row) {
   if (ten && (stat === 'new' || stat === 'new by appfolio') && days > 2) return 'Resident WOs New';
   return 'Other';
 }
-
 function isOC(status) {
   return (status || '').toLowerCase().includes('out');
 }
-
 function isEvicting(lease) {
   return /evict/i.test(lease || '');
 }
-
 // ─── TAB ─────────────────────────────────────────────────────────────
 function showTab(t) {
   ['dq','wo'].forEach(x => {
@@ -600,7 +556,6 @@ function showTab(t) {
     $('tb-' + x).classList.toggle('active', x === t);
   });
 }
-
 // ─── DELINQUENCY ─────────────────────────────────────────────────────
 async function loadDQ() {
   try {
@@ -622,11 +577,9 @@ async function loadDQ() {
       status           : r['Compliance Status']|| '',
       move_out_date    : r['Move Out Date']     || '',
     })).filter(r => (r.tenant || r.property) && !/future/i.test(r.lease));
-
     $('dq-loading').style.display = 'none';
     $('dq-content').style.display = '';
     $('dq-badge').textContent = dqRows.length;
-
     renderDQCards();
     renderDQPods();
     renderDQDetail();
@@ -636,7 +589,6 @@ async function loadDQ() {
     console.error('DQ error:', e);
   }
 }
-
 function renderDQCards() {
   const total  = dqRows.length;
   const ok     = dqRows.filter(r => !isOC(r.status)).length;
@@ -645,7 +597,6 @@ function renderDQCards() {
   const balEv  = dqRows.filter(r => isEvicting(r.lease)).reduce((s, r) => s + r.balance, 0);
   const cntEv  = dqRows.filter(r => isEvicting(r.lease)).length;
   const pct    = total ? Math.round(oc / total * 100) : 0;
-
   $('dq-cards').innerHTML = `
     <div class="card">
       <div class="card-label">Total Delinquent</div>
@@ -674,7 +625,6 @@ function renderDQCards() {
     </div>
   `;
 }
-
 function getDQPodStats() {
   const map = {};
   dqRows.forEach(r => {
@@ -695,7 +645,6 @@ function getDQPodStats() {
   });
   return Object.values(map);
 }
-
 function setDQPodView(mode) {
   dqPodView = mode;
   $('dq-tog-bal').classList.toggle('active', mode === '$');
@@ -706,7 +655,6 @@ function setDQPodView(mode) {
   $('dq-th-ev').innerHTML = isBal ? '⚖ Evicting $'  : '⚖ Evicting #';
   renderDQPods();
 }
-
 function renderDQPods() {
   let pods = getDQPodStats();
   const { col, dir } = dqPodSrt;
@@ -717,14 +665,12 @@ function renderDQPods() {
     const av = (v[col] || v.balance)(a), bv = (v[col] || v.balance)(b);
     return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * dir;
   });
-
   $('dq-pod-pill').textContent = pods.length + ' PODs';
   const totRow = pods.reduce((t, s) => ({
     total: t.total + s.total, balance: t.balance + s.balance, d030: t.d030 + s.d030,
     balOk: t.balOk + s.balOk, balOC: t.balOC + s.balOC, balEv: t.balEv + s.balEv, ev: t.ev + s.ev,
     cntOk: t.cntOk + (s.total - s.oc - s.ev), cntOC: t.cntOC + s.oc
   }), { total: 0, balance: 0, d030: 0, balOk: 0, balOC: 0, balEv: 0, ev: 0, cntOk: 0, cntOC: 0 });
-
   const cntOk  = s => s.total - s.oc - s.ev;
   const dispOk  = s => isBal ? (s.balOk > 0 ? fmt$(s.balOk) : '—') : cntOk(s);
   const dispOC  = s => isBal ? (s.balOC > 0 ? fmt$(s.balOC) : '—') : s.oc;
@@ -734,7 +680,6 @@ function renderDQPods() {
   const colorEv = s => isBal ? (s.balEv > 0 ? '#6a1b9a' : '#aaa') : (s.ev > 0 ? '#6a1b9a' : '#aaa');
   const boldOC  = s => (isBal ? s.balOC : s.oc) > 0 ? '700' : '400';
   const boldEv  = s => (isBal ? s.balEv : s.ev) > 0 ? '700' : '400';
-
   $('dq-pod-body').innerHTML = pods.map(s => `
     <tr onclick="selectPOD('dq','${s.pod.replace(/'/g, "\\'")}')"
         class="${dqPOD === s.pod ? 'selected' : ''}">
@@ -756,7 +701,6 @@ function renderDQPods() {
     </tr>
   `;
 }
-
 function renderDQDetail() {
   const q = ($('dq-search')?.value || '').toLowerCase();
   let rows = dqRows;
@@ -767,7 +711,6 @@ function renderDQDetail() {
   if (q) rows = rows.filter(r =>
     (r.tenant + r.property + r.unit + r.pod).toLowerCase().includes(q)
   );
-
   rows = [...rows];
   const { col, dir } = dqDetSort;
   const key = { tenant:'tenant', property:'property', unit:'unit',
@@ -778,16 +721,13 @@ function renderDQDetail() {
     const av = a[k], bv = b[k];
     return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * dir;
   });
-
   $('dq-detail-title').textContent = dqPOD ? dqPOD : 'All Tenants';
   $('dq-detail-pill').textContent  = rows.length + ' tenant' + (rows.length !== 1 ? 's' : '');
-
   if (!rows.length) {
     $('dq-detail-body').innerHTML =
       '<tr><td colspan="10"><div class="empty-state">No tenants match your filters</div></td></tr>';
     return;
   }
-
   $('dq-detail-body').innerHTML = rows.map(r => {
     const ev = /evict/i.test(r.lease);
     const oc = isOC(r.status);
@@ -811,7 +751,6 @@ function renderDQDetail() {
     `;
   }).join('');
 }
-
 function setDQFilter(f) {
   dqFilter = f;
   ['all','ok','nc','ev'].forEach(k => {
@@ -819,11 +758,20 @@ function setDQFilter(f) {
   });
   renderDQDetail();
 }
-
 // ─── WORK ORDERS ─────────────────────────────────────────────────────
 async function loadWO() {
   try {
+    console.log('🔧 Loading Work Orders from GID:', GIDS.maintenance);
     const raw = await fetchGViz(GIDS.maintenance);
+    console.log('📊 WO Raw data returned:', raw.length, 'rows');
+
+    if (raw.length > 0) {
+      console.log('🔍 First row column names:', Object.keys(raw[0]));
+      console.log('📝 First row sample data:', raw[0]);
+    } else {
+      console.warn('⚠️ No rows returned from Google Sheet');
+    }
+
     woRows = raw.map(r => {
       const row = {
         wo             : r['Work Order #'] || '',
@@ -840,27 +788,31 @@ async function loadWO() {
       return row;
     }).filter(r => r.wo);
 
+    console.log('✅ WO Rows after mapping and filtering:', woRows.length, 'work orders');
+    if (woRows.length > 0) {
+      console.log('📋 Sample mapped rows:', woRows.slice(0, 3));
+    } else {
+      console.warn('⚠️ All rows were filtered out - check if "Work Order #" field is empty or column name mismatch');
+    }
+
     $('wo-loading').style.display = 'none';
     $('wo-content').style.display = '';
     $('wo-badge').textContent = woRows.length;
-
     renderWOCards();
     renderWOPods();
     renderWODetail();
   } catch(e) {
     $('wo-loading').style.display = 'none';
     $('wo-error').style.display   = '';
-    console.error('WO error:', e);
+    console.error('❌ WO error:', e);
   }
 }
-
 function renderWOCards() {
   const total  = woRows.length;
   const over60 = woRows.filter(r => r.wo_category === 'Over 60 Days').length;
   const res7   = woRows.filter(r => r.wo_category === 'Resident WOs Over 7 Days').length;
   const resNew = woRows.filter(r => r.wo_category === 'Resident WOs New').length;
   const other  = woRows.filter(r => r.wo_category === 'Other').length;
-
   $('wo-cards').innerHTML = `
     <div class="card">
       <div class="card-label">Total Work Orders</div>
@@ -889,7 +841,6 @@ function renderWOCards() {
     </div>
   `;
 }
-
 function getWOPodStats() {
   const map = {};
   woRows.forEach(r => {
@@ -903,7 +854,6 @@ function getWOPodStats() {
   });
   return Object.values(map);
 }
-
 function renderWOPods() {
   let pods = getWOPodStats();
   const { col, dir } = woPodSrt;
@@ -913,7 +863,6 @@ function renderWOPods() {
     const av = (v[col] || v.over60)(a), bv = (v[col] || v.over60)(b);
     return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * dir;
   });
-
   $('wo-pod-pill').textContent = pods.length + ' PODs';
   $('wo-pod-body').innerHTML = pods.map(s => `
     <tr onclick="selectPOD('wo','${s.pod.replace(/'/g, "\\'")}')"
@@ -926,7 +875,6 @@ function renderWOPods() {
     </tr>
   `).join('');
 }
-
 function renderWODetail() {
   const q = ($('wo-search')?.value || '').toLowerCase();
   let rows = woRows;
@@ -935,7 +883,6 @@ function renderWODetail() {
   if (q) rows = rows.filter(r =>
     (r.wo + r.property + r.pod + r.status).toLowerCase().includes(q)
   );
-
   rows = [...rows];
   const { col, dir } = woDetSort;
   const key = { wo:'wo', property:'property', pod:'pod', status:'status',
@@ -945,22 +892,18 @@ function renderWODetail() {
     const av = a[k], bv = b[k];
     return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * dir;
   });
-
   $('wo-detail-title').textContent = woPOD ? woPOD : 'All Work Orders';
   $('wo-detail-pill').textContent  = rows.length + ' work order' + (rows.length !== 1 ? 's' : '');
-
   if (!rows.length) {
     $('wo-detail-body').innerHTML =
       '<tr><td colspan="7"><div class="empty-state">No work orders match your filters</div></td></tr>';
     return;
   }
-
   const catBadge = { 'Over 60 Days':'b-60', 'Resident WOs Over 7 Days':'b-r7',
                      'Resident WOs New':'b-rn', 'Other':'b-oth' };
   const catLabel = { 'Over 60 Days':'60+ Days', 'Resident WOs Over 7 Days':'Res 7d+',
                      'Resident WOs New':'Res New', 'Other':'Other' };
   const dayColor = d => d > 60 ? '#c62828' : d > 30 ? '#e65100' : d > 7 ? '#f57f17' : '#555';
-
   $('wo-detail-body').innerHTML = rows.map(r => {
     const tenYes = r.tenant_reported?.trim().toLowerCase() === 'yes';
     return `
@@ -976,7 +919,6 @@ function renderWODetail() {
     `;
   }).join('');
 }
-
 function setWOFilter(f) {
   woFilter = f;
   ['all','60','r7','rn','oth'].forEach(k => {
@@ -989,7 +931,6 @@ function setWOFilter(f) {
   if (el) el.classList.add('on');
   renderWODetail();
 }
-
 // ─── SHARED INTERACTIONS ─────────────────────────────────────────────
 function selectPOD(tab, pod) {
   if (tab === 'dq') {
@@ -1004,11 +945,9 @@ function selectPOD(tab, pod) {
     renderWODetail();
   }
 }
-
 function clearPOD(tab) {
   selectPOD(tab, tab === 'dq' ? dqPOD : woPOD);
 }
-
 function podSort(tab, col) {
   if (tab === 'dq') {
     dqPodSrt.dir = dqPodSrt.col === col ? -dqPodSrt.dir : -1;
@@ -1020,7 +959,6 @@ function podSort(tab, col) {
     renderWOPods();
   }
 }
-
 function detSort(tab, col) {
   if (tab === 'dq') {
     dqDetSort.dir = dqDetSort.col === col ? -dqDetSort.dir : -1;
@@ -1032,13 +970,11 @@ function detSort(tab, col) {
     renderWODetail();
   }
 }
-
 // ─── INIT ─────────────────────────────────────────────────────────────
 (async () => {
   $('lastUpdated').textContent = 'Refreshed ' + new Date().toLocaleString('en-US',
     { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
-
-  // h functionality
+  // Refresh button functionality
   const CLOUD_FUNCTION_URL = 'https://us-central1-appfolio-dashboard-491122.cloudfunctions.net/sync_appfolio_data';
   const refreshBtn = document.getElementById('refreshBtn');
   if (refreshBtn) {
