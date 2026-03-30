@@ -539,8 +539,8 @@ function woCategory(row) {
   const days  = daysSince(row.created_date);
   const ten   = (row.tenant_reported || '').trim() === 'Resident';
   const stat  = (row.status || '').trim().toLowerCase();
-  if (days > 60) return 'Over 60 Days';
-  if (ten && days > 7) return 'Resident WOs Over 7 Days';
+  if (days >= 60) return 'Over 60 Days';
+  if (ten && days >= 7) return 'Resident WOs Over 7 Days';
   if (ten && (stat === 'new' || stat === 'new by appfolio')) return 'Resident WOs New';
   return 'Other';
 }
