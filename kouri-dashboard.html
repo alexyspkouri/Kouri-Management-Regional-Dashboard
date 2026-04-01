@@ -305,6 +305,10 @@ tbody td { padding: 9px 14px; color: #333; }
     🔧 Work Orders
     <span class="tab-badge" id="wo-badge">—</span>
   </div>
+  <div class="tab-btn" id="tb-rx" onclick="showTab('rx')">
+    💰 Receivables
+    <span class="tab-badge" id="rx-badge">—</span>
+  </div>
 </div>
 <!-- ═══════════════════ DQ TAB ═══════════════════ -->
 <div id="tab-dq" class="content">
@@ -463,13 +467,90 @@ tbody td { padding: 9px 14px; color: #333; }
     </div>
   </div>
 </div>
+<!-- ═══════════════════ RECEIVABLES TAB ═══════════════════ -->
+<div id="tab-rx" class="content" style="display:none">
+  <div class="error-state" id="rx-error" style="display:none">
+    ⚠️ <strong>Could not load receivables data.</strong><br><br>
+    Ensure the Receipts tab GID is set in the dashboard configuration and that your Google Sheet is publicly shared.
+  </div>
+  <div id="rx-loading" class="loading-state">
+    <div class="spinner"></div><br>Loading receivables data…
+  </div>
+  <div id="rx-content" style="display:none">
+    <!-- Summary Cards -->
+    <div class="cards" id="rx-cards"></div>
+    <!-- Two Panels -->
+    <div class="panels">
+      <!-- Left: POD Summary Table -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">By Property Group</span>
+          <span class="panel-hint">Undeposited receipts only</span>
+        </div>
+        <div class="pod-tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th onclick="podSort('rx','pod')">POD</th>
+                <th onclick="podSort('rx','compliant')" style="color:#2e7d32">✓ Compliant</th>
+                <th onclick="podSort('rx','ooc')" style="color:#c62828">✗ Out of Comp</th>
+                <th onclick="podSort('rx','total')">Total Count</th>
+                <th onclick="podSort('rx','amount')" style="text-align:right">Amount</th>
+              </tr>
+            </thead>
+            <tbody id="rx-pod-body"></tbody>
+          </table>
+        </div>
+        <div style="padding:8px 14px;border-top:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center">
+          <span class="pill" id="rx-pod-pill">— PODs</span>
+          <span class="clear-btn" onclick="clearPOD('rx')" id="rx-clear" style="display:none">Clear filter</span>
+        </div>
+      </div>
+      <!-- Right: Detail Table -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title" id="rx-detail-title">All Undeposited Receipts</span>
+          <span class="pill" id="rx-detail-pill">— receipts</span>
+        </div>
+        <div class="toolbar">
+          <input class="search-input" id="rx-search" placeholder="Search property, payee, reference…" oninput="renderRXDetail()">
+          <div class="chips">
+            <div class="chip on" id="rx-f-all" onclick="setRXFilter('all')">All</div>
+            <div class="chip" id="rx-f-ok" onclick="setRXFilter('ok')" style="color:#2e7d32;border-color:#a5d6a7">✓ Compliant</div>
+            <div class="chip" id="rx-f-ooc" onclick="setRXFilter('ooc')" style="color:#c62828;border-color:#ef9a9a">✗ Out of Comp</div>
+          </div>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th onclick="detSort('rx','txn_id')">Txn ID</th>
+                <th onclick="detSort('rx','property')">Property</th>
+                <th onclick="detSort('rx','pod')">POD</th>
+                <th onclick="detSort('rx','payee')">Payee</th>
+                <th onclick="detSort('rx','receipt_date')">Receipt Date</th>
+                <th onclick="detSort('rx','amount')">Amount</th>
+                <th onclick="detSort('rx','reference')">Reference</th>
+                <th onclick="detSort('rx','deadline_date')">Deadline</th>
+                <th onclick="detSort('rx','days_overdue')">Days Overdue</th>
+                <th onclick="detSort('rx','status')">Compliance</th>
+              </tr>
+            </thead>
+            <tbody id="rx-detail-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 <script>
 // ─── CONFIG ──────────────────────────────────────────────────────────
 const SHEET_ID = '1hrqBQNfYFurz9I9LEXegtgQxS4aWuMPKZsNsF5JEro8';
 const GIDS = {
   dqAudit:     '695079073',
   maintenance: '469847885',
-  woSummary:   '300749393'
+  woSummary:   '300749393',
+  receipts:    '000000000'  // ← UPDATE WITH YOUR RECEIPTS TAB GID
 };
 // ─── JSONP DATA FETCH (works from file:// — no CORS needed) ──────────
 let _cbSeq = 0;
@@ -507,14 +588,16 @@ function fetchGViz(gid) {
   });
 }
 // ─── STATE ───────────────────────────────────────────────────────────
-let dqRows = [], woRows = [], woSummaryRows = [];
-let dqPOD = null, woPOD = null;
-let dqFilter = 'all', woFilter = 'all';
+let dqRows = [], woRows = [], woSummaryRows = [], rxRows = [];
+let dqPOD = null, woPOD = null, rxPOD = null;
+let dqFilter = 'all', woFilter = 'all', rxFilter = 'all';
 let dqPodView  = '$';   // '$' = balance, '#' = tenant count
 let dqDetSort  = { col: 'balance',  dir: -1 };
 let woDetSort  = { col: 'days',     dir: -1 };
+let rxDetSort  = { col: 'receipt_date', dir: -1 };
 let dqPodSrt   = { col: 'balance',  dir: -1 };
 let woPodSrt   = { col: 'over60',   dir: -1 };
+let rxPodSrt   = { col: 'ooc',      dir: -1 };
 // ─── UTILS ───────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 const fmt$ = v => {
@@ -552,10 +635,12 @@ function isEvicting(lease) {
 }
 // ─── TAB ─────────────────────────────────────────────────────────────
 function showTab(t) {
-  ['dq','wo'].forEach(x => {
+  ['dq','wo','rx'].forEach(x => {
     $('tab-' + x).style.display  = x === t ? '' : 'none';
     $('tb-' + x).classList.toggle('active', x === t);
   });
+  // Auto-load tab data on first view
+  if (t === 'rx' && rxRows.length === 0) loadRX();
 }
 // ─── DELINQUENCY ─────────────────────────────────────────────────────
 async function loadDQ() {
@@ -989,22 +1074,6 @@ function setWOFilter(f) {
   renderWODetail();
 }
 // ─── SHARED INTERACTIONS ─────────────────────────────────────────────
-function selectPOD(tab, pod) {
-  if (tab === 'dq') {
-    dqPOD = (dqPOD === pod) ? null : pod;
-    $('dq-clear').style.display = dqPOD ? '' : 'none';
-    renderDQPods();
-    renderDQDetail();
-  } else {
-    woPOD = (woPOD === pod) ? null : pod;
-    $('wo-clear').style.display = woPOD ? '' : 'none';
-    renderWOPods();
-    renderWODetail();
-  }
-}
-function clearPOD(tab) {
-  selectPOD(tab, tab === 'dq' ? dqPOD : woPOD);
-}
 function podSort(tab, col) {
   if (tab === 'dq') {
     dqPodSrt.dir = dqPodSrt.col === col ? -dqPodSrt.dir : -1;
@@ -1021,10 +1090,209 @@ function detSort(tab, col) {
     dqDetSort.dir = dqDetSort.col === col ? -dqDetSort.dir : -1;
     dqDetSort.col = col;
     renderDQDetail();
-  } else {
+  } else if (tab === 'wo') {
     woDetSort.dir = woDetSort.col === col ? -woDetSort.dir : -1;
     woDetSort.col = col;
     renderWODetail();
+  } else if (tab === 'rx') {
+    rxDetSort.dir = rxDetSort.col === col ? -rxDetSort.dir : -1;
+    rxDetSort.col = col;
+    renderRXDetail();
+  }
+}
+// ─── RECEIVABLES ─────────────────────────────────────────────────────────
+async function loadRX() {
+  try {
+    const raw = await fetchGViz(GIDS.receipts);
+    rxRows = raw.map(r => ({
+      txn_id       : r['txn_id']           || '',
+      property     : r['property']         || '',
+      property_id  : r['property_id']      || '',
+      pod          : r['pod']              || '',
+      payee        : r['payee']            || '',
+      receipt_date : r['receipt_date']     || '',
+      receipt_amount: parseFloat(r['receipt_amount']) || 0,
+      reference    : r['reference']        || '',
+      remarks      : r['remarks']          || '',
+      deadline_date: r['deadline_date']    || '',
+      days_overdue : parseInt(r['days_overdue']) || 0,
+      compliance_status: r['compliance_status'] || '',
+      synced_at    : r['synced_at']        || '',
+    }));
+    $('rx-loading').style.display = 'none';
+    $('rx-content').style.display = '';
+    $('rx-badge').textContent = rxRows.length;
+    renderRXCards();
+    renderRXPods();
+    renderRXDetail();
+  } catch(e) {
+    $('rx-loading').style.display = 'none';
+    $('rx-error').style.display   = '';
+    console.error('RX error:', e);
+  }
+}
+function renderRXCards() {
+  const total = rxRows.length;
+  const compliant = rxRows.filter(r => r.compliance_status === 'Compliant').length;
+  const ooc = rxRows.filter(r => r.compliance_status === 'Out of Compliance').length;
+  const totalAmt = rxRows.reduce((s, r) => s + r.receipt_amount, 0);
+  const oocAmt = rxRows.filter(r => r.compliance_status === 'Out of Compliance')
+                       .reduce((s, r) => s + r.receipt_amount, 0);
+  const maxOverdue = rxRows.length > 0 ? Math.max(...rxRows.map(r => r.days_overdue)) : 0;
+
+  $('rx-cards').innerHTML = `
+    <div class="card">
+      <div class="card-label">Total Undeposited</div>
+      <div class="card-value">${total}</div>
+      <div class="card-sub">receipts</div>
+    </div>
+    <div class="card" style="border-top-color: #2e7d32;">
+      <div class="card-label">Compliant</div>
+      <div class="card-value green">${compliant}</div>
+      <div class="card-sub">${total > 0 ? Math.round(compliant/total*100) : 0}% on time</div>
+    </div>
+    <div class="card red">
+      <div class="card-label">Out of Compliance</div>
+      <div class="card-value red">${ooc}</div>
+      <div class="card-sub">overdue for deposit</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Total Amount</div>
+      <div class="card-value">${fmt$(totalAmt)}</div>
+      <div class="card-sub">awaiting deposit</div>
+    </div>
+    <div class="card red">
+      <div class="card-label">Out of Compliance Amt</div>
+      <div class="card-value red">${fmt$(oocAmt)}</div>
+      <div class="card-sub">max overdue: ${maxOverdue}d</div>
+    </div>
+  `;
+}
+function getRXPodStats() {
+  const map = {};
+  rxRows.forEach(r => {
+    const p = r.pod || 'Unknown';
+    if (!map[p]) map[p] = { pod: p, compliant: 0, ooc: 0, total: 0, amount: 0 };
+    map[p].total++;
+    map[p].amount += r.receipt_amount;
+    if (r.compliance_status === 'Compliant') map[p].compliant++;
+    else map[p].ooc++;
+  });
+  return Object.values(map);
+}
+function renderRXPods() {
+  let pods = getRXPodStats();
+  const { col, dir } = rxPodSrt;
+  pods.sort((a, b) => {
+    const v = { pod: x => x.pod, compliant: x => x.compliant, ooc: x => x.ooc,
+                total: x => x.total, amount: x => x.amount };
+    const av = (v[col] || v.ooc)(a), bv = (v[col] || v.ooc)(b);
+    return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * dir;
+  });
+  $('rx-pod-pill').textContent = pods.length + ' PODs';
+  $('rx-pod-body').innerHTML = pods.map(s => `
+    <tr onclick="selectPOD('rx','${s.pod.replace(/'/g, "\\'")}')"
+        class="${rxPOD === s.pod ? 'selected' : ''}">
+      <td><strong>${s.pod}</strong></td>
+      <td style="color:#2e7d32">${s.compliant || '—'}</td>
+      <td style="color:${s.ooc > 0 ? '#c62828' : '#ccc'}">${s.ooc || '—'}</td>
+      <td>${s.total}</td>
+      <td style="text-align:right">${fmt$(s.amount)}</td>
+    </tr>
+  `).join('');
+}
+function renderRXDetail() {
+  const q = ($('rx-search')?.value || '').toLowerCase();
+  let rows = rxRows;
+  if (rxPOD) rows = rows.filter(r => r.pod === rxPOD);
+  if (rxFilter === 'ok') {
+    rows = rows.filter(r => r.compliance_status === 'Compliant');
+  } else if (rxFilter === 'ooc') {
+    rows = rows.filter(r => r.compliance_status === 'Out of Compliance');
+  }
+  if (q) {
+    rows = rows.filter(r =>
+      r.property.toLowerCase().includes(q) ||
+      r.payee.toLowerCase().includes(q) ||
+      r.reference.toLowerCase().includes(q) ||
+      r.txn_id.toLowerCase().includes(q)
+    );
+  }
+  const { col, dir } = rxDetSort;
+  rows.sort((a, b) => {
+    const v = {
+      txn_id: x => x.txn_id,
+      property: x => x.property,
+      pod: x => x.pod,
+      payee: x => x.payee,
+      receipt_date: x => x.receipt_date,
+      amount: x => x.receipt_amount,
+      reference: x => x.reference,
+      deadline_date: x => x.deadline_date,
+      days_overdue: x => x.days_overdue,
+      status: x => x.compliance_status
+    };
+    const av = (v[col] || v.receipt_date)(a), bv = (v[col] || v.receipt_date)(b);
+    return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * dir;
+  });
+  $('rx-detail-pill').textContent = rows.length + ' receipts';
+  $('rx-detail-body').innerHTML = rows.map(r => {
+    const isOOC = r.compliance_status === 'Out of Compliance';
+    return `<tr style="background:${isOOC ? 'rgba(198,40,40,0.04)' : ''}">
+      <td><code style="font-size:11px">${trunc(r.txn_id, 10)}</code></td>
+      <td>${trunc(r.property, 20)}</td>
+      <td><strong>${r.pod}</strong></td>
+      <td>${trunc(r.payee, 15)}</td>
+      <td>${fmtDate(r.receipt_date)}</td>
+      <td style="text-align:right">${fmt$(r.receipt_amount)}</td>
+      <td>${trunc(r.reference, 15)}</td>
+      <td>${fmtDate(r.deadline_date)}</td>
+      <td style="text-align:center;color:${r.days_overdue > 0 ? '#c62828' : '#2e7d32'}">${r.days_overdue > 0 ? r.days_overdue + 'd' : '—'}</td>
+      <td style="color:${isOOC ? '#c62828' : '#2e7d32'};font-weight:700">${isOOC ? '✗' : '✓'}</td>
+    </tr>`;
+  }).join('');
+}
+function setRXFilter(f) {
+  rxFilter = f;
+  ['all','ok','ooc'].forEach(x =>
+    $('rx-f-' + x).classList.toggle('on', f === x)
+  );
+  renderRXDetail();
+}
+function selectPOD(tab, pod) {
+  if (tab === 'dq') {
+    dqPOD = dqPOD === pod ? null : pod;
+    $('dq-clear').style.display = dqPOD ? '' : 'none';
+    renderDQPods();
+    renderDQDetail();
+  } else if (tab === 'wo') {
+    woPOD = woPOD === pod ? null : pod;
+    $('wo-clear').style.display = woPOD ? '' : 'none';
+    renderWOPods();
+    renderWODetail();
+  } else if (tab === 'rx') {
+    rxPOD = rxPOD === pod ? null : pod;
+    $('rx-clear').style.display = rxPOD ? '' : 'none';
+    renderRXPods();
+    renderRXDetail();
+  }
+}
+function clearPOD(tab) {
+  if (tab === 'dq') {
+    dqPOD = null;
+    $('dq-clear').style.display = 'none';
+    renderDQPods();
+    renderDQDetail();
+  } else if (tab === 'wo') {
+    woPOD = null;
+    $('wo-clear').style.display = 'none';
+    renderWOPods();
+    renderWODetail();
+  } else if (tab === 'rx') {
+    rxPOD = null;
+    $('rx-clear').style.display = 'none';
+    renderRXPods();
+    renderRXDetail();
   }
 }
 // ─── INIT ─────────────────────────────────────────────────────────────
@@ -1059,7 +1327,12 @@ function detSort(tab, col) {
             }, 3000);
       });
   }
-  await Promise.all([loadDQ(), loadWO()]);
+  const loaders = [loadDQ(), loadWO()];
+  // Only load receivables if GID is properly configured
+  if (GIDS.receipts !== '000000000') {
+    loaders.push(loadRX());
+  }
+  await Promise.all(loaders);
 })();
 </script>
 </body>
