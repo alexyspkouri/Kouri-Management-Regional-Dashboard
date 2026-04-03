@@ -817,8 +817,8 @@ function renderDQDetail() {
   $('dq-detail-body').innerHTML = rows.map(r => {
     const ev = /evict/i.test(r.lease);
     const oc = isOC(r.status);
-    const noteLines      = (r.note || '').split('\n').map(l => l.trim()).filter(Boolean);
-    const lastNote       = noteLines.slice(-3).join('\n');
+    const noteEntries    = (r.note || '').split(/;\s*\n/).map(l => l.trim()).filter(Boolean);
+    const lastNote       = noteEntries.slice(0, 3).join(';\n');
     const complianceNote = (r.compliance_notes || '').trim();
     return `
       <tr>
