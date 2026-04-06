@@ -590,6 +590,8 @@ tbody td { padding: 9px 14px; color: #333; }
           <div class="chips" style="margin-left:auto">
             <div class="chip on" id="ret-v-hist" onclick="setRetView('hist')">📊 Histogram</div>
             <div class="chip" id="ret-v-list" onclick="setRetView('list')">📋 Tenant List</div>
+            <div class="chip" id="ret-v-prop" onclick="setRetView('prop')">🏢 Properties</div>
+            <div class="chip" id="ret-v-monthly" onclick="setRetView('monthly')">📅 Monthly</div>
           </div>
         </div>
         <!-- Histogram view -->
@@ -610,6 +612,42 @@ tbody td { padding: 9px 14px; color: #333; }
             </thead>
             <tbody id="ret-list-body"></tbody>
           </table>
+        </div>
+        <!-- Properties view -->
+        <div id="ret-prop-wrap" class="tbl-wrap" style="display:none">
+          <table>
+            <thead>
+              <tr>
+                <th>Property</th>
+                <th style="text-align:center">Units</th>
+                <th style="color:#2e7d32;text-align:center">Retained</th>
+                <th>Rate</th>
+              </tr>
+            </thead>
+            <tbody id="ret-prop-body"></tbody>
+          </table>
+          <div style="padding:10px 16px;background:#f9f9f9;border-top:1px solid #eee;font-size:11px;color:#888">
+            ⓘ Showing properties with more than 4 units. Unit count reflects currently active tenants in this snapshot.
+          </div>
+        </div>
+        <!-- Monthly trend view -->
+        <div id="ret-monthly-wrap" class="tbl-wrap" style="display:none">
+          <table>
+            <thead>
+              <tr>
+                <th>Month</th>
+                <th style="text-align:center;color:#1565c0">Move Ins</th>
+                <th style="text-align:center;color:#2e7d32">Retained Active*</th>
+                <th style="text-align:center;color:#bbb" title="Requires sync update">Leases Expiring</th>
+                <th style="text-align:center;color:#bbb" title="Requires sync update">Move Outs</th>
+                <th style="text-align:center;color:#bbb" title="Requires sync update">Renewals</th>
+              </tr>
+            </thead>
+            <tbody id="ret-monthly-body"></tbody>
+          </table>
+          <div style="padding:10px 16px;background:#f9f9f9;border-top:1px solid #eee;font-size:11px;color:#888">
+            * Based on currently active tenants only. <strong>Leases Expiring, Move Outs, and Renewals</strong> require a sync script update to capture historical event data.
+          </div>
         </div>
       </div>
     </div>
@@ -1491,22 +1529,22 @@ function renderRETPoDs() {
 
 function setRetView(v) {
   retView = v;
-  ['hist','list'].forEach(x => $('ret-v-'+x).classList.toggle('on', x===v));
+  ['hist','list','prop','monthly'].forEach(x => $('ret-v-'+x).classList.toggle('on', x===v));
   renderRETRight();
 }
 
 function renderRETRight() {
   const rows = retPOD ? retRows.filter(r => r.pod === retPOD) : retRows;
-  $('ret-right-title').textContent = retPOD ? retPOD : (retView==='hist' ? 'Tenure Distribution' : 'All Tenants');
-  if (retView === 'hist') {
-    $('ret-histogram').style.display = '';
-    $('ret-list-wrap').style.display = 'none';
-    renderRETHistogram(rows);
-  } else {
-    $('ret-histogram').style.display = 'none';
-    $('ret-list-wrap').style.display = '';
-    renderRETList(rows);
-  }
+  const titles = { hist: 'Tenure Distribution', list: 'All Tenants', prop: 'Property Summary', monthly: 'Monthly Trend (12 mo)' };
+  $('ret-right-title').textContent = retPOD ? retPOD + ' — ' + (titles[retView] || '') : (titles[retView] || '');
+  $('ret-histogram').style.display    = retView === 'hist'    ? '' : 'none';
+  $('ret-list-wrap').style.display    = retView === 'list'    ? '' : 'none';
+  $('ret-prop-wrap').style.display    = retView === 'prop'    ? '' : 'none';
+  $('ret-monthly-wrap').style.display = retView === 'monthly' ? '' : 'none';
+  if      (retView === 'hist')    renderRETHistogram(rows);
+  else if (retView === 'list')    renderRETList(rows);
+  else if (retView === 'prop')    renderRETProperties(rows);
+  else if (retView === 'monthly') renderRETMonthly(rows);
   renderRETCards();
 }
 
@@ -1572,6 +1610,85 @@ function retListSort(col) {
   if (retListSrt.col === col) retListSrt.dir *= -1;
   else { retListSrt.col = col; retListSrt.dir = 1; }
   renderRETList(retPOD ? retRows.filter(r=>r.pod===retPOD) : retRows);
+}
+
+function renderRETProperties(rows) {
+  const map = {};
+  rows.forEach(r => {
+    const p = r.property || 'Unknown';
+    if (!map[p]) map[p] = { property: p, total: 0, retained: 0 };
+    map[p].total++;
+    if (r.retained === 'Yes') map[p].retained++;
+  });
+  const props = Object.values(map)
+    .filter(p => p.total > 4)
+    .map(p => ({ ...p, rate: p.total > 0 ? p.retained / p.total : 0 }))
+    .sort((a, b) => b.rate - a.rate);
+  if (props.length === 0) {
+    $('ret-prop-body').innerHTML = `<tr><td colspan="4" style="text-align:center;color:#888;padding:24px">No properties with more than 4 units found${retPOD ? ' in ' + retPOD : ''}.</td></tr>`;
+    return;
+  }
+  $('ret-prop-body').innerHTML = props.map(p => {
+    const pct = (p.rate * 100).toFixed(1);
+    const barW = Math.round(p.rate * 100);
+    const barColor = p.rate >= 0.75 ? '#2e7d32' : p.rate >= 0.5 ? '#66bb6a' : '#ef9a9a';
+    return `<tr>
+      <td><strong>${p.property}</strong></td>
+      <td style="text-align:center">
+        <span style="background:#e3f2fd;color:#1565c0;padding:2px 9px;border-radius:10px;font-size:12px;font-weight:600">${p.total}</span>
+      </td>
+      <td style="text-align:center;color:#2e7d32;font-weight:600">${p.retained}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:6px">
+          <div style="flex:1;height:8px;background:#f0f0f0;border-radius:4px;min-width:80px">
+            <div style="width:${barW}%;height:100%;background:${barColor};border-radius:4px"></div>
+          </div>
+          <span style="font-size:11px;color:#555;min-width:36px">${pct}%</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function renderRETMonthly(rows) {
+  const today = new Date();
+  const months = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    months.push({
+      year: d.getFullYear(), month: d.getMonth(),
+      label: d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+      firstDay: d, lastDay: lastDay,
+      moveIns: 0, retainedActive: 0
+    });
+  }
+  rows.forEach(r => {
+    if (!r.move_in) return;
+    const mi = new Date(r.move_in);
+    if (isNaN(mi)) return;
+    months.forEach(m => {
+      // Move Ins: tenants whose move-in date is in this month
+      if (mi.getFullYear() === m.year && mi.getMonth() === m.month) m.moveIns++;
+      // Retained Active: tenants who had >= 365 days tenure by end of this month
+      const daysAtEndOfMonth = Math.floor((m.lastDay - mi) / 86400000);
+      if (daysAtEndOfMonth >= 365) m.retainedActive++;
+    });
+  });
+  // Most recent month first
+  const display = [...months].reverse();
+  $('ret-monthly-body').innerHTML = display.map((m, i) => {
+    const isCurrentMonth = i === 0;
+    const rowStyle = isCurrentMonth ? 'background:#f0f7f0;font-weight:600' : '';
+    return `<tr style="${rowStyle}">
+      <td style="white-space:nowrap">${m.label}${isCurrentMonth ? ' <span style="font-size:10px;color:#888;font-weight:400">(current)</span>' : ''}</td>
+      <td style="text-align:center;color:${m.moveIns > 0 ? '#1565c0' : '#bbb'};font-weight:${m.moveIns > 0 ? '600' : '400'}">${m.moveIns || '—'}</td>
+      <td style="text-align:center;color:${m.retainedActive > 0 ? '#2e7d32' : '#bbb'};font-weight:${m.retainedActive > 0 ? '600' : '400'}">${m.retainedActive || '—'}</td>
+      <td style="text-align:center;color:#ccc">—</td>
+      <td style="text-align:center;color:#ccc">—</td>
+      <td style="text-align:center;color:#ccc">—</td>
+    </tr>`;
+  }).join('');
 }
 
 function podSort(tab, col) {
