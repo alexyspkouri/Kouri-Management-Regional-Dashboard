@@ -637,16 +637,16 @@ tbody td { padding: 9px 14px; color: #333; }
               <tr>
                 <th>Month</th>
                 <th style="text-align:center;color:#1565c0">Move Ins</th>
-                <th style="text-align:center;color:#2e7d32">Retained Active*</th>
-                <th style="text-align:center;color:#bbb" title="Requires sync update">Leases Expiring</th>
-                <th style="text-align:center;color:#bbb" title="Requires sync update">Move Outs</th>
-                <th style="text-align:center;color:#bbb" title="Requires sync update">Renewals</th>
+                <th style="text-align:center;color:#2e7d32">Active*</th>
+                <th style="text-align:center;color:#e65100">Leases Expiring</th>
+                <th style="text-align:center;color:#c62828">Move Outs</th>
+                <th style="text-align:center;color:#6a1b9a">Renewals</th>
               </tr>
             </thead>
             <tbody id="ret-monthly-body"></tbody>
           </table>
           <div style="padding:10px 16px;background:#f9f9f9;border-top:1px solid #eee;font-size:11px;color:#888">
-            * Based on currently active tenants only. <strong>Leases Expiring, Move Outs, and Renewals</strong> require a sync script update to capture historical event data.
+            * All figures reflect <strong>currently active tenants</strong> only. Move Outs shows scheduled move-outs; historical move-outs of departed tenants are not included. After running the updated sync, set <code>retentionMonthly</code> GID to unlock Leases Expiring, Move Outs, and Renewals columns.
           </div>
         </div>
       </div>
@@ -661,7 +661,8 @@ const GIDS = {
   maintenance: '469847885',
   woSummary:   '300749393',
   receipts:    '1771445150',
-  retention:   '82038347'
+  retention:        '82038347',
+  retentionMonthly: '000000000'  // ← UPDATE WITH YOUR RETENTION MONTHLY TAB GID
 };
 // ─── JSONP DATA FETCH (works from file:// — no CORS needed) ──────────
 let _cbSeq = 0;
@@ -1419,6 +1420,7 @@ function clearPOD(tab) {
 }
 // ─── TENANT RETENTION ────────────────────────────────────────────────
 let retRows = [], retPOD = null, retView = 'hist';
+let retMonthlyRows = [];   // pre-computed monthly aggregates from Retention Monthly sheet tab
 let retPodSrt = { col: 'rate', dir: -1 };
 let retListSrt = { col: 'days', dir: -1 };
 const BUCKETS = ['Under 1 Year','1-2 Years','2-3 Years','Over 3 Years'];
@@ -1447,6 +1449,30 @@ async function loadRET() {
     $('ret-loading').style.display = 'none';
     $('ret-error').style.display   = '';
     console.error('RET error:', e);
+  }
+}
+
+async function loadRETMonthly() {
+  if (GIDS.retentionMonthly === '000000000') return;
+  try {
+    const raw = await fetchGViz(GIDS.retentionMonthly);
+    retMonthlyRows = raw.map(r => ({
+      ym          : r['Year-Month']          || '',
+      pod         : r['POD']                 || '',
+      moveIns     : parseInt(r['Move Ins'])            || 0,
+      active      : parseInt(r['Active'])              || 0,
+      expiring    : parseInt(r['Leases Expiring'])      || 0,
+      renewals    : parseInt(r['Renewals'])             || 0,
+      moveOuts    : parseInt(r['Scheduled Move Outs'])  || 0,
+      isCurrent   : (r['Is Current Month'] || '') === 'Yes',
+    }));
+    // If monthly view is currently active, re-render with real data
+    if (retView === 'monthly') {
+      const rows = retPOD ? retRows.filter(r => r.pod === retPOD) : retRows;
+      renderRETMonthly(rows);
+    }
+  } catch(e) {
+    console.warn('Retention Monthly load failed:', e);
   }
 }
 
@@ -1651,6 +1677,49 @@ function renderRETProperties(rows) {
 }
 
 function renderRETMonthly(rows) {
+  // ── Server-side data available (post sync-update) ─────────────────
+  if (retMonthlyRows.length > 0) {
+    // Aggregate across all PODs (or filter to selected POD)
+    const podFilter = retPOD;
+    const source = podFilter
+      ? retMonthlyRows.filter(r => r.pod === podFilter)
+      : retMonthlyRows;
+
+    // Group by Year-Month and sum all POD rows
+    const byYM = {};
+    source.forEach(r => {
+      if (!byYM[r.ym]) byYM[r.ym] = { ym: r.ym, isCurrent: r.isCurrent, moveIns: 0, active: 0, expiring: 0, renewals: 0, moveOuts: 0 };
+      const m = byYM[r.ym];
+      m.moveIns   += r.moveIns;
+      m.active    += r.active;
+      m.expiring  += r.expiring;
+      m.renewals  += r.renewals;
+      m.moveOuts  += r.moveOuts;
+    });
+
+    // Sort most-recent first
+    const sorted = Object.values(byYM).sort((a, b) => b.ym.localeCompare(a.ym));
+    const fmt = ym => {
+      const [yr, mo] = ym.split('-').map(Number);
+      return new Date(yr, mo - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    };
+    const cell = (n, color) => n > 0
+      ? `<td style="text-align:center;color:${color};font-weight:600">${n}</td>`
+      : `<td style="text-align:center;color:#bbb">—</td>`;
+
+    $('ret-monthly-body').innerHTML = sorted.map(m => `
+      <tr style="${m.isCurrent ? 'background:#f0f7f0;font-weight:600' : ''}">
+        <td style="white-space:nowrap">${fmt(m.ym)}${m.isCurrent ? ' <span style="font-size:10px;color:#888;font-weight:400">(current)</span>' : ''}</td>
+        ${cell(m.moveIns,  '#1565c0')}
+        ${cell(m.active,   '#2e7d32')}
+        ${cell(m.expiring, '#e65100')}
+        ${cell(m.moveOuts, '#c62828')}
+        ${cell(m.renewals, '#6a1b9a')}
+      </tr>`).join('');
+    return;
+  }
+
+  // ── Fallback: client-side computation from snapshot (Move Ins only) ─
   const today = new Date();
   const months = [];
   for (let i = 11; i >= 0; i--) {
@@ -1668,25 +1737,21 @@ function renderRETMonthly(rows) {
     const mi = new Date(r.move_in);
     if (isNaN(mi)) return;
     months.forEach(m => {
-      // Move Ins: tenants whose move-in date is in this month
       if (mi.getFullYear() === m.year && mi.getMonth() === m.month) m.moveIns++;
-      // Retained Active: tenants who had >= 365 days tenure by end of this month
       const daysAtEndOfMonth = Math.floor((m.lastDay - mi) / 86400000);
       if (daysAtEndOfMonth >= 365) m.retainedActive++;
     });
   });
-  // Most recent month first
   const display = [...months].reverse();
   $('ret-monthly-body').innerHTML = display.map((m, i) => {
-    const isCurrentMonth = i === 0;
-    const rowStyle = isCurrentMonth ? 'background:#f0f7f0;font-weight:600' : '';
-    return `<tr style="${rowStyle}">
-      <td style="white-space:nowrap">${m.label}${isCurrentMonth ? ' <span style="font-size:10px;color:#888;font-weight:400">(current)</span>' : ''}</td>
+    const isCur = i === 0;
+    return `<tr style="${isCur ? 'background:#f0f7f0;font-weight:600' : ''}">
+      <td style="white-space:nowrap">${m.label}${isCur ? ' <span style="font-size:10px;color:#888;font-weight:400">(current)</span>' : ''}</td>
       <td style="text-align:center;color:${m.moveIns > 0 ? '#1565c0' : '#bbb'};font-weight:${m.moveIns > 0 ? '600' : '400'}">${m.moveIns || '—'}</td>
       <td style="text-align:center;color:${m.retainedActive > 0 ? '#2e7d32' : '#bbb'};font-weight:${m.retainedActive > 0 ? '600' : '400'}">${m.retainedActive || '—'}</td>
-      <td style="text-align:center;color:#ccc">—</td>
-      <td style="text-align:center;color:#ccc">—</td>
-      <td style="text-align:center;color:#ccc">—</td>
+      <td style="text-align:center;color:#aaa" title="Run sync to enable">—</td>
+      <td style="text-align:center;color:#aaa" title="Run sync to enable">—</td>
+      <td style="text-align:center;color:#aaa" title="Run sync to enable">—</td>
     </tr>`;
   }).join('');
 }
@@ -1739,6 +1804,10 @@ function podSort(tab, col) {
     loaders.push(loadRET());
   }
   await Promise.all(loaders);
+  // Load monthly data after main tabs (non-blocking)
+  if (GIDS.retentionMonthly !== '000000000') {
+    loadRETMonthly();
+  }
 })();
 </script>
 </body>
