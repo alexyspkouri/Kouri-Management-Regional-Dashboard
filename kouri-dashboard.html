@@ -7,11 +7,16 @@
 <!-- No external scripts needed — uses Google's built-in JSONP gviz endpoint -->
 <style>
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%;
+  height: 100%;
+}
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: #f0f2f5;
   color: #1a1a2e;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 /* ─── Header ─── */
 .header {
@@ -636,17 +641,18 @@ tbody td { padding: 9px 14px; color: #333; }
             <thead>
               <tr>
                 <th>Month</th>
-                <th style="text-align:center;color:#1565c0">Move Ins</th>
                 <th style="text-align:center;color:#2e7d32">Active*</th>
                 <th style="text-align:center;color:#e65100">Leases Expiring</th>
                 <th style="text-align:center;color:#c62828">Move Outs</th>
+                <th style="text-align:center;color:#f57c00">Pending Renewals</th>
                 <th style="text-align:center;color:#6a1b9a">Renewals</th>
+                <th style="text-align:center;color:#1565c0">Move Ins</th>
               </tr>
             </thead>
             <tbody id="ret-monthly-body"></tbody>
           </table>
           <div style="padding:10px 16px;background:#f9f9f9;border-top:1px solid #eee;font-size:11px;color:#888">
-            * Figures sourced from the AppFolio Tenant Tickler report, which includes former tenants. Active = tenants present at the start of the month. Move Outs and Leases Expiring reflect actual historical events.
+            * Figures sourced from the AppFolio Lease History report, which includes former tenants. Active = tenants present at the start of the month. Renewals = fully executed (Completed status). Pending Renewals = sent but not yet countersigned.
           </div>
         </div>
       </div>
@@ -1457,14 +1463,15 @@ async function loadRETMonthly() {
   try {
     const raw = await fetchGViz(GIDS.retentionMonthly);
     retMonthlyRows = raw.map(r => ({
-      ym          : r['Year-Month']          || '',
-      pod         : r['POD']                 || '',
-      moveIns     : parseInt(r['Move Ins'])            || 0,
-      active      : parseInt(r['Active'])              || 0,
-      expiring    : parseInt(r['Leases Expiring'])      || 0,
-      renewals    : parseInt(r['Renewals'])             || 0,
-      moveOuts    : parseInt(r['Move Outs'])             || 0,
-      isCurrent   : (r['Is Current Month'] || '') === 'Yes',
+      ym              : r['Year-Month']          || '',
+      pod             : r['POD']                 || '',
+      active          : parseInt(r['Active'])              || 0,
+      expiring        : parseInt(r['Leases Expiring'])     || 0,
+      moveOuts        : parseInt(r['Move Outs'])            || 0,
+      pendingRenewals : parseInt(r['Pending Renewals'])    || 0,
+      renewals        : parseInt(r['Renewals'])             || 0,
+      moveIns         : parseInt(r['Move Ins'])             || 0,
+      isCurrent       : (r['Is Current Month'] || '') === 'Yes',
     }));
     // If monthly view is currently active, re-render with real data
     if (retView === 'monthly') {
@@ -1688,13 +1695,14 @@ function renderRETMonthly(rows) {
     // Group by Year-Month and sum all POD rows
     const byYM = {};
     source.forEach(r => {
-      if (!byYM[r.ym]) byYM[r.ym] = { ym: r.ym, isCurrent: r.isCurrent, moveIns: 0, active: 0, expiring: 0, renewals: 0, moveOuts: 0 };
+      if (!byYM[r.ym]) byYM[r.ym] = { ym: r.ym, isCurrent: r.isCurrent, active: 0, expiring: 0, moveOuts: 0, pendingRenewals: 0, renewals: 0, moveIns: 0 };
       const m = byYM[r.ym];
-      m.moveIns   += r.moveIns;
-      m.active    += r.active;
-      m.expiring  += r.expiring;
-      m.renewals  += r.renewals;
-      m.moveOuts  += r.moveOuts;
+      m.active           += r.active;
+      m.expiring         += r.expiring;
+      m.moveOuts         += r.moveOuts;
+      m.pendingRenewals  += r.pendingRenewals;
+      m.renewals         += r.renewals;
+      m.moveIns          += r.moveIns;
     });
 
     // Sort most-recent first
@@ -1710,11 +1718,12 @@ function renderRETMonthly(rows) {
     $('ret-monthly-body').innerHTML = sorted.map(m => `
       <tr style="${m.isCurrent ? 'background:#f0f7f0;font-weight:600' : ''}">
         <td style="white-space:nowrap">${fmt(m.ym)}${m.isCurrent ? ' <span style="font-size:10px;color:#888;font-weight:400">(current)</span>' : ''}</td>
-        ${cell(m.moveIns,  '#1565c0')}
-        ${cell(m.active,   '#2e7d32')}
-        ${cell(m.expiring, '#e65100')}
-        ${cell(m.moveOuts, '#c62828')}
-        ${cell(m.renewals, '#6a1b9a')}
+        ${cell(m.active,          '#2e7d32')}
+        ${cell(m.expiring,        '#e65100')}
+        ${cell(m.moveOuts,        '#c62828')}
+        ${cell(m.pendingRenewals, '#f57c00')}
+        ${cell(m.renewals,        '#6a1b9a')}
+        ${cell(m.moveIns,         '#1565c0')}
       </tr>`).join('');
     return;
   }
