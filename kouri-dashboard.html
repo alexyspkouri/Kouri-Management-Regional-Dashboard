@@ -1463,7 +1463,7 @@ async function loadRETMonthly() {
       active      : parseInt(r['Active'])              || 0,
       expiring    : parseInt(r['Leases Expiring'])      || 0,
       renewals    : parseInt(r['Renewals'])             || 0,
-      moveOuts    : parseInt(r['Scheduled Move Outs'])  || 0,
+      moveOuts    : parseInt(r['Move Outs'])             || 0,
       isCurrent   : (r['Is Current Month'] || '') === 'Yes',
     }));
     // If monthly view is currently active, re-render with real data
