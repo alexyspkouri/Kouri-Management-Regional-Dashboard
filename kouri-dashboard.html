@@ -594,9 +594,9 @@ tbody td { padding: 9px 14px; color: #333; }
           <span class="panel-title" id="ret-right-title">Tenure Distribution</span>
           <div class="chips" style="margin-left:auto">
             <div class="chip on" id="ret-v-hist" onclick="setRetView('hist')">📊 Histogram</div>
-            <div class="chip" id="ret-v-list" onclick="setRetView('list')">📋 Tenant List</div>
             <div class="chip" id="ret-v-prop" onclick="setRetView('prop')">🏢 Properties</div>
             <div class="chip" id="ret-v-monthly" onclick="setRetView('monthly')">📅 Monthly</div>
+            <div class="chip" id="ret-v-list" onclick="setRetView('list')">📋 Tenant List</div>
           </div>
         </div>
         <!-- Histogram view -->
@@ -1730,8 +1730,10 @@ function renderRETMonthly(rows) {
 
   // ── Fallback: client-side computation from snapshot (Move Ins only) ─
   const today = new Date();
+  const curYear = today.getFullYear(), curMonth = today.getMonth();
   const months = [];
-  for (let i = 11; i >= 0; i--) {
+  // 12 back through 9 forward = i from 12 down to -9
+  for (let i = 12; i >= -9; i--) {
     const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
     const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0);
     months.push({
@@ -1752,15 +1754,15 @@ function renderRETMonthly(rows) {
     });
   });
   const display = [...months].reverse();
-  $('ret-monthly-body').innerHTML = display.map((m, i) => {
-    const isCur = i === 0;
+  $('ret-monthly-body').innerHTML = display.map(m => {
+    const isCur = m.year === curYear && m.month === curMonth;
     return `<tr style="${isCur ? 'background:#f0f7f0;font-weight:600' : ''}">
       <td style="white-space:nowrap">${m.label}${isCur ? ' <span style="font-size:10px;color:#888;font-weight:400">(current)</span>' : ''}</td>
+      <td style="text-align:center;color:#aaa" title="Run sync to enable">—</td>
+      <td style="text-align:center;color:#aaa" title="Run sync to enable">—</td>
+      <td style="text-align:center;color:#aaa" title="Run sync to enable">—</td>
+      <td style="text-align:center;color:#aaa" title="Run sync to enable">—</td>
       <td style="text-align:center;color:${m.moveIns > 0 ? '#1565c0' : '#bbb'};font-weight:${m.moveIns > 0 ? '600' : '400'}">${m.moveIns || '—'}</td>
-      <td style="text-align:center;color:${m.retainedActive > 0 ? '#2e7d32' : '#bbb'};font-weight:${m.retainedActive > 0 ? '600' : '400'}">${m.retainedActive || '—'}</td>
-      <td style="text-align:center;color:#aaa" title="Run sync to enable">—</td>
-      <td style="text-align:center;color:#aaa" title="Run sync to enable">—</td>
-      <td style="text-align:center;color:#aaa" title="Run sync to enable">—</td>
     </tr>`;
   }).join('');
 }
