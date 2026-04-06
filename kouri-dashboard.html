@@ -597,6 +597,7 @@ tbody td { padding: 9px 14px; color: #333; }
             <div class="chip" id="ret-v-prop" onclick="setRetView('prop')">🏢 Properties</div>
             <div class="chip" id="ret-v-monthly" onclick="setRetView('monthly')">📅 Monthly</div>
             <div class="chip" id="ret-v-list" onclick="setRetView('list')">📋 Tenant List</div>
+            <div class="chip" id="ret-v-trend" onclick="setRetView('trend')">📈 Trend</div>
           </div>
         </div>
         <!-- Histogram view -->
@@ -635,6 +636,14 @@ tbody td { padding: 9px 14px; color: #333; }
             ⓘ Showing properties with more than 4 units. Unit count reflects currently active tenants in this snapshot.
           </div>
         </div>
+        <!-- Retention rate trend chart -->
+        <div id="ret-trend-wrap" style="display:none;padding:16px">
+          <div id="ret-trend-chart"></div>
+          <div style="padding:8px 0 0;font-size:11px;color:#888">
+            * Retention rate = tenants with ≥ 1 year tenure ÷ total active tenants, measured at the start of each month. Sourced from tickler data (includes former tenants).
+          </div>
+        </div>
+
         <!-- Monthly trend view -->
         <div id="ret-monthly-wrap" class="tbl-wrap" style="display:none">
           <table>
@@ -668,7 +677,8 @@ const GIDS = {
   woSummary:   '300749393',
   receipts:    '1771445150',
   retention:        '82038347',
-  retentionMonthly: '5709581'
+  retentionMonthly: '5709581',
+  retentionHistory: '000000000'
 };
 // ─── JSONP DATA FETCH (works from file:// — no CORS needed) ──────────
 let _cbSeq = 0;
@@ -1427,6 +1437,7 @@ function clearPOD(tab) {
 // ─── TENANT RETENTION ────────────────────────────────────────────────
 let retRows = [], retPOD = null, retView = 'hist';
 let retMonthlyRows = [];   // pre-computed monthly aggregates from Retention Monthly sheet tab
+let retHistoryRows = [];   // pre-computed historical retention rates from Retention History sheet tab
 let retPodSrt = { col: 'rate', dir: -1 };
 let retListSrt = { col: 'days', dir: -1 };
 const BUCKETS = ['Under 1 Year','1-2 Years','2-3 Years','Over 3 Years'];
@@ -1473,13 +1484,33 @@ async function loadRETMonthly() {
       moveIns         : parseInt(r['Move Ins'])             || 0,
       isCurrent       : (r['Is Current Month'] || '') === 'Yes',
     }));
-    // If monthly view is currently active, re-render with real data
+    // If monthly or trend view is currently active, re-render with real data
     if (retView === 'monthly') {
       const rows = retPOD ? retRows.filter(r => r.pod === retPOD) : retRows;
       renderRETMonthly(rows);
+    } else if (retView === 'trend') {
+      renderRETTrend();
     }
   } catch(e) {
     console.warn('Retention Monthly load failed:', e);
+  }
+}
+
+async function loadRETHistory() {
+  if (GIDS.retentionHistory === '000000000') return;
+  try {
+    const raw = await fetchGViz(GIDS.retentionHistory);
+    retHistoryRows = raw.map(r => ({
+      ym        : r['Year-Month']        || '',
+      pod       : r['POD']               || '',
+      total     : parseInt(r['Total Active'])       || 0,
+      retained  : parseInt(r['Retained'])            || 0,
+      rate      : parseFloat(r['Retention Rate %']) || null,
+      isCurrent : (r['Is Current Month'] || '') === 'Yes',
+    }));
+    if (retView === 'trend') renderRETTrend();
+  } catch(e) {
+    console.warn('Retention History load failed:', e);
   }
 }
 
@@ -1562,22 +1593,24 @@ function renderRETPoDs() {
 
 function setRetView(v) {
   retView = v;
-  ['hist','list','prop','monthly'].forEach(x => $('ret-v-'+x).classList.toggle('on', x===v));
+  ['hist','list','prop','monthly','trend'].forEach(x => $('ret-v-'+x).classList.toggle('on', x===v));
   renderRETRight();
 }
 
 function renderRETRight() {
   const rows = retPOD ? retRows.filter(r => r.pod === retPOD) : retRows;
-  const titles = { hist: 'Tenure Distribution', list: 'All Tenants', prop: 'Property Summary', monthly: 'Monthly Trend (12 mo)' };
+  const titles = { hist: 'Tenure Distribution', list: 'All Tenants', prop: 'Property Summary', monthly: 'Monthly Activity', trend: 'Retention Rate Trend (12 mo)' };
   $('ret-right-title').textContent = retPOD ? retPOD + ' — ' + (titles[retView] || '') : (titles[retView] || '');
   $('ret-histogram').style.display    = retView === 'hist'    ? '' : 'none';
   $('ret-list-wrap').style.display    = retView === 'list'    ? '' : 'none';
   $('ret-prop-wrap').style.display    = retView === 'prop'    ? '' : 'none';
   $('ret-monthly-wrap').style.display = retView === 'monthly' ? '' : 'none';
+  $('ret-trend-wrap').style.display   = retView === 'trend'   ? '' : 'none';
   if      (retView === 'hist')    renderRETHistogram(rows);
   else if (retView === 'list')    renderRETList(rows);
   else if (retView === 'prop')    renderRETProperties(rows);
   else if (retView === 'monthly') renderRETMonthly(rows);
+  else if (retView === 'trend')   renderRETTrend();
   renderRETCards();
 }
 
@@ -1775,6 +1808,140 @@ function podSort(tab, col) {
   }
 }
 
+function renderRETTrend() {
+  const container = $('ret-trend-chart');
+  if (!retHistoryRows.length) {
+    container.innerHTML = '<div style="padding:40px;text-align:center;color:#aaa">Run a sync to load trend data.</div>';
+    return;
+  }
+
+  const fmt = ym => {
+    const [yr, mo] = ym.split('-').map(Number);
+    return new Date(yr, mo-1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+  };
+
+  // SVG dimensions
+  const W = 560, H = 240, PL = 44, PR = 16, PT = 20, PB = 52;
+  const cW = W - PL - PR, cH = H - PT - PB;
+
+  // Determine PODs and months to show
+  const allPODs = [...new Set(retHistoryRows.map(r => r.pod))].sort();
+  const podsToShow = retPOD ? [retPOD] : allPODs;
+
+  // Collect all months (sorted), use first POD as reference
+  const allYMs = [...new Set(retHistoryRows.map(r => r.ym))].sort();
+  const n = allYMs.length;
+  const xStep = n > 1 ? cW / (n - 1) : cW;
+  const xPos  = i => PL + i * xStep;
+
+  // Build per-POD data series
+  const series = podsToShow.map((pod, si) => {
+    const podRows = retHistoryRows.filter(r => r.pod === pod);
+    const byYM = {};
+    podRows.forEach(r => { byYM[r.ym] = r; });
+    return {
+      pod,
+      points: allYMs.map((ym, i) => {
+        const r = byYM[ym];
+        return { ym, i, rate: r ? r.rate : null, isCurrent: r ? r.isCurrent : false };
+      }),
+    };
+  });
+
+  // Y-axis range across all series
+  const allRates = series.flatMap(s => s.points.map(p => p.rate)).filter(r => r !== null);
+  if (!allRates.length) {
+    container.innerHTML = '<div style="padding:40px;text-align:center;color:#aaa">No data available for this POD.</div>';
+    return;
+  }
+  const minR = Math.max(0,   Math.min(...allRates) - 8);
+  const maxR = Math.min(100, Math.max(...allRates) + 8);
+  const yScale = v => PT + cH - ((v - minR) / (maxR - minR)) * cH;
+
+  // Palette — one colour per POD
+  const palette = ['#1565c0','#2e7d32','#c62828','#6a1b9a','#e65100','#00838f','#558b2f','#ad1457'];
+  const color = si => palette[si % palette.length];
+
+  // Grid lines
+  let gridLines = '';
+  [0, 25, 50, 75, 100].filter(v => v >= minR && v <= maxR).forEach(v => {
+    const y = yScale(v);
+    gridLines += `<line x1="${PL}" y1="${y}" x2="${W-PR}" y2="${y}" stroke="#eee" stroke-width="1"/>`;
+    gridLines += `<text x="${PL-6}" y="${y+4}" text-anchor="end" font-size="10" fill="#aaa">${v}%</text>`;
+  });
+
+  // X-axis labels
+  let xLabels = '';
+  allYMs.forEach((ym, i) => {
+    const isCur = retHistoryRows.some(r => r.ym === ym && r.isCurrent);
+    const skip  = n > 8 && i % 2 !== 0 && !isCur;
+    if (skip) return;
+    xLabels += `<text x="${xPos(i)}" y="${H-6}" text-anchor="middle" font-size="10"
+      fill="${isCur ? '#006140' : '#999'}" font-weight="${isCur ? '600' : '400'}">${fmt(ym)}</text>`;
+  });
+
+  // Lines, dots, labels per series
+  let seriesSVG = '';
+  series.forEach((s, si) => {
+    const c = color(si);
+    const valid = s.points.filter(p => p.rate !== null);
+    if (!valid.length) return;
+
+    // Line
+    const path = valid.map((p, vi) => `${vi === 0 ? 'M' : 'L'}${xPos(p.i)},${yScale(p.rate)}`).join(' ');
+
+    // Area fill only when single POD shown
+    let area = '';
+    if (podsToShow.length === 1) {
+      const fi = valid[0].i, li = valid[valid.length-1].i;
+      const gradId = `aG${si}`;
+      area = `<defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${c}" stop-opacity="0.12"/>
+        <stop offset="100%" stop-color="${c}" stop-opacity="0.01"/>
+      </linearGradient></defs>
+      <path d="${path} L${xPos(li)},${PT+cH} L${xPos(fi)},${PT+cH} Z" fill="url(#${gradId})"/>`;
+    }
+
+    // Dots + value labels
+    let dots = '';
+    s.points.forEach(p => {
+      if (p.rate === null) return;
+      const cx = xPos(p.i), cy = yScale(p.rate);
+      const r  = p.isCurrent ? 6 : 4;
+      dots += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${p.isCurrent ? '#006140' : c}" stroke="white" stroke-width="2">
+        <title>${s.pod} ${fmt(p.ym)}: ${p.rate}%</title></circle>`;
+      if (p.isCurrent) {
+        dots += `<text x="${cx}" y="${cy-10}" text-anchor="middle" font-size="10" font-weight="600" fill="#006140">${p.rate}%</text>`;
+      } else if (podsToShow.length === 1) {
+        dots += `<text x="${cx}" y="${cy-8}" text-anchor="middle" font-size="9" fill="#666">${p.rate}%</text>`;
+      }
+    });
+
+    seriesSVG += `${area}
+      <path d="${path}" fill="none" stroke="${c}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+      ${dots}`;
+  });
+
+  // Legend (only when multiple PODs)
+  let legend = '';
+  if (podsToShow.length > 1) {
+    let lx = PL, ly = H - 14;
+    series.forEach((s, si) => {
+      legend += `<rect x="${lx}" y="${ly-8}" width="10" height="10" fill="${color(si)}" rx="2"/>
+        <text x="${lx+13}" y="${ly}" font-size="10" fill="#555">${s.pod}</text>`;
+      lx += s.pod.length * 7 + 24;
+    });
+  }
+
+  container.innerHTML = `
+    <svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;max-width:${W}px">
+      ${gridLines}
+      ${seriesSVG}
+      ${xLabels}
+      ${legend}
+    </svg>`;
+}
+
 // ─── INIT ─────────────────────────────────────────────────────────────
 (async () => {
   $('lastUpdated').textContent = 'Refreshed ' + new Date().toLocaleString('en-US',
@@ -1818,6 +1985,9 @@ function podSort(tab, col) {
   // Load monthly data after main tabs (non-blocking)
   if (GIDS.retentionMonthly !== '000000000') {
     loadRETMonthly();
+  }
+  if (GIDS.retentionHistory !== '000000000') {
+    loadRETHistory();
   }
 })();
 </script>
