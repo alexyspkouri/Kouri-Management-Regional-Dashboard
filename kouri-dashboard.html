@@ -2823,10 +2823,12 @@ function renderLFDetail() {
     body = src.map(r => {
       const st  = r.status   || '—';
       const stColor  = /approv/i.test(st)  ? '#2e7d32' : /denied|reject/i.test(st)  ? '#c62828' : /pending/i.test(st)  ? '#e65100' : '#555';
-      // Deposit paid date: earliest deposit for this property+unit in ALL deposit records
+      // Deposit paid date: earliest deposit for this property+unit on or after the application date
+      const appDate = parseDate(r.date);
       const depMatch = r.property && r.unit
         ? lfDepRows.filter(d => d.property === r.property && d.unit === r.unit)
-            .map(d => parseDate(d.date)).filter(Boolean).sort((a,b) => a-b)[0]
+            .map(d => parseDate(d.date)).filter(d => d && (!appDate || d >= appDate))
+            .sort((a,b) => a-b)[0]
         : null;
       const isGrouped = r.group_id && multiGroups.has(r.group_id);
       const pal       = isGrouped ? GROUP_PALETTES[grpColorIdx[r.group_id]] : null;
