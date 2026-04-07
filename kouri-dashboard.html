@@ -52,10 +52,9 @@ body {
   border-radius: 0;
 }
 .header-logo-img {
-  height: 40px;
+  height: 44px;
   width: auto;
   display: block;
-  filter: drop-shadow(0 1px 4px rgba(0,180,100,0.25));
 }
 .header-divider {
   width: 1px;
@@ -810,6 +809,7 @@ tbody td { padding: 9px 14px; color: #333; }
         <div class="chip on" id="lf-dr-cw"  onclick="setLFDateRange('cw')">Current Week</div>
         <div class="chip"    id="lf-dr-lw"  onclick="setLFDateRange('lw')">Last Week</div>
         <div class="chip"    id="lf-dr-mtd" onclick="setLFDateRange('mtd')">Month to Date</div>
+        <div class="chip"    id="lf-dr-lm"  onclick="setLFDateRange('lm')">Last Month</div>
       </div>
       <span id="lf-range-label" style="font-size:11px;color:#aaa;margin-left:4px"></span>
     </div>
@@ -2175,6 +2175,11 @@ function getLFDateBounds(key) {
     const lSat = new Date(sunday); lSat.setDate(sunday.getDate() - 1); lSat.setHours(23,59,59,999);
     return { from: lSun, to: lSat };
   }
+  if (key === 'lm') {
+    const lmStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const lmEnd   = new Date(today.getFullYear(), today.getMonth(), 0); lmEnd.setHours(23,59,59,999);
+    return { from: lmStart, to: lmEnd };
+  }
   return { from: new Date(today.getFullYear(), today.getMonth(), 1), to: today };
 }
 
@@ -2225,19 +2230,21 @@ async function loadLFGC() {
   if (GIDS.lfGuestCards === '000000000') return;
   const raw = await fetchGViz(GIDS.lfGuestCards);
   lfGCRows = raw.map(r => ({
-    date     : r['Received On']   || '',
-    prospect : r['Prospect Name'] || '',
-    property : r['Property']      || '',
-    pod      : r['POD']           || '',
-    source   : r['Source']        || '',
-    status   : r['Status']        || '',
-    assigned : r['Assigned User'] || '',
-    email    : r['Email']         || '',
-    phone    : r['Phone']         || '',
-    move_in  : r['Move In Date']  || '',
-    bedrooms : r['Bedrooms']      || '',
-    notes    : r['Notes']         || '',
-    inq_id   : r['Inquiry ID']    || '',
+    date         : r['Received On']          || '',
+    prospect     : r['Prospect Name']        || '',
+    property     : r['Property']             || '',
+    pod          : r['POD']                  || '',
+    source       : r['Source']               || '',
+    inq_type     : r['Inquiry Type']         || '',
+    status       : r['Status']               || '',
+    texts_sent   : r['Texts Sent']           || '',
+    time_to_contact : r['Time to 1st Contact'] || '',
+    email        : r['Email']                || '',
+    phone        : r['Phone']                || '',
+    move_in      : r['Move In Date']         || '',
+    bedrooms     : r['Bedrooms']             || '',
+    notes        : r['Notes']                || '',
+    inq_id       : r['Inquiry ID']           || '',
   }));
 }
 
@@ -2251,7 +2258,8 @@ async function loadLFSh() {
     pod          : r['POD']           || '',
     status       : r['Status']        || '',
     assigned     : r['Assigned User'] || '',
-    showing_type : r['Showing Type']  || '',
+    source       : r['Source']        || '',
+    inq_type     : r['Inquiry Type']  || '',
     notes        : r['Notes']         || '',
     inq_id       : r['Inquiry ID']    || '',
   }));
@@ -2261,31 +2269,36 @@ async function loadLFApp() {
   if (GIDS.lfApplications === '000000000') return;
   const raw = await fetchGViz(GIDS.lfApplications);
   lfAppRows = raw.map(r => ({
-    date         : r['Application Date'] || '',
-    prospect     : r['Applicant Name']   || '',
-    property     : r['Property']         || '',
-    pod          : r['POD']              || '',
-    status       : r['Status']           || '',
-    decision_dt  : r['Decision Date']    || '',
-    inq_id       : r['Inquiry ID']       || '',
-    app_id       : r['Application ID']   || '',
-    monthly_rent : r['Monthly Rent']     || '',
+    date         : r['Application Date']  || '',
+    prospect     : r['Applicant Name']    || '',
+    property     : r['Property']          || '',
+    pod          : r['POD']               || '',
+    status       : r['Status']            || '',
+    screening    : r['Screening Status']  || '',
+    reason       : r['Reason for Status'] || '',
+    lead_source  : r['Lead Source']       || '',
+    decision_dt  : r['Decision Date']     || '',
+    inq_id       : r['Inquiry ID']        || '',
+    app_id       : r['Application ID']    || '',
   }));
 }
 
 async function loadLFDep() {
   if (GIDS.lfDeposits === '000000000') return;
   const raw = await fetchGViz(GIDS.lfDeposits);
-  lfDepRows = raw.map(r => ({
-    date       : r['Posted On']          || '',
-    payee      : r['Payee']              || '',
-    property   : r['Property']           || '',
-    pod        : r['POD']                || '',
-    amount     : parseFloat(r['Amount']) || 0,
-    gl_account : r['GL Account']         || '',
-    reference  : r['Reference']          || '',
-    txn_id     : r['Transaction ID']     || '',
-  }));
+  lfDepRows = raw
+    .map(r => ({
+      date       : r['Posted On']          || '',
+      payee      : r['Payee']              || '',
+      property   : r['Property']           || '',
+      pod        : r['POD']                || '',
+      unit       : r['Unit']               || '',
+      amount     : parseFloat(r['Amount']) || 0,
+      gl_account : r['GL Account']         || '',
+      reference  : r['Reference']          || '',
+      txn_id     : r['Transaction ID']     || '',
+    }))
+    .filter(r => r.unit && r.amount > 0);  // debits with a unit only
   // Debug: open browser console to inspect what loaded
   console.log('[LF Deposits] Total rows:', lfDepRows.length);
   if (lfDepRows.length > 0) {
@@ -2302,7 +2315,7 @@ async function loadLFDep() {
 // ── State setters ─────────────────────────────────────────────────────
 function setLFDateRange(key) {
   lfDateRange = key;
-  ['cw','lw','mtd'].forEach(k => $('lf-dr-' + k).classList.toggle('on', k === key));
+  ['cw','lw','mtd','lm'].forEach(k => $('lf-dr-' + k).classList.toggle('on', k === key));
   renderLF();
 }
 
@@ -2475,18 +2488,28 @@ function renderLFDetail() {
     src = lfFilterDetail(lfGCRows, 'date');
     if (lfPOD) src = src.filter(r => r.pod === lfPOD);
     src.sort(colSort);
+    colspan = 7;
     head = `<tr>
       <th onclick="lfDetSort('date')">Received</th>
       <th onclick="lfDetSort('prospect')">Prospect</th>
       <th onclick="lfDetSort('property')">Property</th>
       <th onclick="lfDetSort('source')">Source</th>
+      <th onclick="lfDetSort('inq_type')">Inquiry Type</th>
       <th onclick="lfDetSort('status')">Status</th>
-      <th onclick="lfDetSort('assigned')">Assigned To</th>
+      <th onclick="lfDetSort('texts_sent')" style="text-align:center">Texts Sent</th>
+      <th onclick="lfDetSort('time_to_contact')">Time to 1st Contact</th>
     </tr>`;
+    colspan = 8;
     const empty = lfGCRows.length === 0 && GIDS.lfGuestCards !== '000000000' ? 'Loading…' : 'No guest cards for this period';
     body = src.map(r => `<tr>
-      <td>${fmtDate(r.date)}</td><td>${r.prospect||'—'}</td><td>${r.property||'—'}</td>
-      <td>${r.source||'—'}</td><td>${r.status||'—'}</td><td>${r.assigned||'—'}</td>
+      <td>${fmtDate(r.date)}</td>
+      <td>${r.prospect||'—'}</td>
+      <td>${r.property||'—'}</td>
+      <td>${r.source||'—'}</td>
+      <td>${r.inq_type||'—'}</td>
+      <td>${r.status||'—'}</td>
+      <td style="text-align:center">${r.texts_sent||'—'}</td>
+      <td>${r.time_to_contact||'—'}</td>
     </tr>`).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
 
   } else if (lfView === 'sh') {
@@ -2498,16 +2521,18 @@ function renderLFDetail() {
       <th onclick="lfDetSort('prospect')">Prospect</th>
       <th onclick="lfDetSort('property')">Property</th>
       <th onclick="lfDetSort('status')">Status</th>
-      <th onclick="lfDetSort('showing_type')">Type</th>
+      <th onclick="lfDetSort('source')">Source</th>
+      <th onclick="lfDetSort('inq_type')">Inquiry Type</th>
       <th onclick="lfDetSort('assigned')">Assigned To</th>
     </tr>`;
+    colspan = 7;
     const empty = lfShRows.length === 0 && GIDS.lfShowings !== '000000000' ? 'Loading…' : 'No showings for this period';
     body = src.map(r => {
       const st = r.status || '—';
       const color = /complet/i.test(st) ? '#2e7d32' : /cancel|no.?show/i.test(st) ? '#c62828' : '#555';
       return `<tr>
         <td>${fmtDate(r.date)}</td><td>${r.prospect||'—'}</td><td>${r.property||'—'}</td>
-        <td style="color:${color};font-weight:600">${st}</td><td>${r.showing_type||'—'}</td><td>${r.assigned||'—'}</td>
+        <td style="color:${color};font-weight:600">${st}</td><td>${r.source||'—'}</td><td>${r.inq_type||'—'}</td><td>${r.assigned||'—'}</td>
       </tr>`;
     }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
 
@@ -2515,22 +2540,30 @@ function renderLFDetail() {
     src = lfFilterDetail(lfAppRows, 'date');
     if (lfPOD) src = src.filter(r => r.pod === lfPOD);
     src.sort(colSort);
+    colspan = 7;
     head = `<tr>
       <th onclick="lfDetSort('date')">App Date</th>
       <th onclick="lfDetSort('prospect')">Applicant</th>
       <th onclick="lfDetSort('property')">Property</th>
+      <th onclick="lfDetSort('lead_source')">Lead Source</th>
       <th onclick="lfDetSort('status')">Status</th>
-      <th onclick="lfDetSort('decision_dt')">Decision Date</th>
-      <th onclick="lfDetSort('monthly_rent')" style="text-align:right">Monthly Rent</th>
+      <th onclick="lfDetSort('screening')">Screening</th>
+      <th onclick="lfDetSort('reason')">Reason</th>
     </tr>`;
     const empty = lfAppRows.length === 0 && GIDS.lfApplications !== '000000000' ? 'Loading…' : 'No applications for this period';
     body = src.map(r => {
-      const st = r.status || '—';
-      const color = /approv/i.test(st) ? '#2e7d32' : /denied|reject/i.test(st) ? '#c62828' : /pending/i.test(st) ? '#e65100' : '#555';
+      const st  = r.status   || '—';
+      const scr = r.screening || '—';
+      const stColor  = /approv/i.test(st)  ? '#2e7d32' : /denied|reject/i.test(st)  ? '#c62828' : /pending/i.test(st)  ? '#e65100' : '#555';
+      const scrColor = /complet/i.test(scr) ? '#2e7d32' : /fail|adverse/i.test(scr) ? '#c62828' : /screen/i.test(scr) ? '#1565c0' : '#555';
       return `<tr>
-        <td>${fmtDate(r.date)}</td><td>${r.prospect||'—'}</td><td>${r.property||'—'}</td>
-        <td style="color:${color};font-weight:600">${st}</td><td>${fmtDate(r.decision_dt)}</td>
-        <td style="text-align:right">${r.monthly_rent ? '$'+parseFloat(r.monthly_rent).toLocaleString() : '—'}</td>
+        <td>${fmtDate(r.date)}</td>
+        <td>${r.prospect || '—'}</td>
+        <td>${r.property || '—'}</td>
+        <td>${r.lead_source || '—'}</td>
+        <td style="color:${stColor};font-weight:600">${st}</td>
+        <td style="color:${scrColor};font-weight:600">${scr}</td>
+        <td style="color:#666;font-size:12px">${r.reason || '—'}</td>
       </tr>`;
     }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
 
