@@ -2451,17 +2451,21 @@ function lfAggByPOD() {
     if (/complet/i.test(r.status)) m.showings_comp++;
   });
   // Applications — count unique group IDs per POD (co-applicants in same group = 1)
-  const podAppGroups = {};
+  const podAppGroups = {}, podPendingGroups = {}, podApprovedGroups = {};
   lfFilterDetail(lfAppRows, 'date').forEach(r => {
     const pod = r.pod || 'Unknown';
     ensure(pod);
-    if (!podAppGroups[pod]) podAppGroups[pod] = new Set();
-    podAppGroups[pod].add(r.group_id || `__solo_${r.app_id || r.prospect + r.date}`);
-    const m = map[pod];
-    if (/decision pending|in review/i.test(r.status)) m.pending++;
-    if (/approv/i.test(r.status)) m.approved++;
+    const gid = r.group_id || `__solo_${r.app_id || r.prospect + r.date}`;
+    if (!podAppGroups[pod])      podAppGroups[pod]      = new Set();
+    if (!podPendingGroups[pod])  podPendingGroups[pod]  = new Set();
+    if (!podApprovedGroups[pod]) podApprovedGroups[pod] = new Set();
+    podAppGroups[pod].add(gid);
+    if (/decision pending|in review/i.test(r.status)) podPendingGroups[pod].add(gid);
+    if (/approv/i.test(r.status))                     podApprovedGroups[pod].add(gid);
   });
-  Object.entries(podAppGroups).forEach(([pod, groups]) => { map[pod].apps = groups.size; });
+  Object.entries(podAppGroups).forEach(([pod, g])      => { map[pod].apps     = g.size; });
+  Object.entries(podPendingGroups).forEach(([pod, g])  => { map[pod].pending  = g.size; });
+  Object.entries(podApprovedGroups).forEach(([pod, g]) => { map[pod].approved = g.size; });
   // Deposits — deduplicate by property+unit+payee (split payments count as one)
   const podDepKeys = {};
   lfFilterDetail(lfDepRows, 'date').forEach(r => {
@@ -2502,10 +2506,12 @@ function renderLFCards() {
   const inquiries    = gcRows.length;
   const shTotal      = shRows.length;
   const shComp       = shRows.filter(r => /complet/i.test(r.status)).length;
-  const appGroupSet  = new Set(appRows.map(r => r.group_id || `__solo_${r.app_id || r.prospect + r.date}`));
-  const apps         = appGroupSet.size;
-  const appsPending  = appRows.filter(r => /decision pending|in review/i.test(r.status)).length;
-  const appsApproved = appRows.filter(r => /approv/i.test(r.status)).length;
+  const appGroupSet       = new Set(appRows.map(r => r.group_id || `__solo_${r.app_id || r.prospect + r.date}`));
+  const apps              = appGroupSet.size;
+  const pendingGroupSet   = new Set(appRows.filter(r => /decision pending|in review/i.test(r.status)).map(r => r.group_id || `__solo_${r.app_id || r.prospect + r.date}`));
+  const approvedGroupSet  = new Set(appRows.filter(r => /approv/i.test(r.status)).map(r => r.group_id || `__solo_${r.app_id || r.prospect + r.date}`));
+  const appsPending  = pendingGroupSet.size;
+  const appsApproved = approvedGroupSet.size;
   // Deduplicate deposits by property+unit+payee — split payments count as one
   const depKeySet = new Set(depRows.map(r => r.payee ? `${r.property}|${r.unit}|${r.payee}` : r.txn_id));
   const deposits  = depKeySet.size;
@@ -2539,21 +2545,30 @@ function renderLFCards() {
 
   // ── Applications: conv + showing→app + pending→approval ─────────────
   const appConv = shComp > 0 ? Math.round(apps / shComp * 100) : null;
+  // Deduplicate appRows by group — one representative row per group (earliest received date)
+  // so co-applicants don't inflate time averages
+  const dedupAppMap = {};
+  appRows.forEach(r => {
+    const gid = r.group_id || `__solo_${r.app_id || r.prospect + r.date}`;
+    const d = parseDate(r.date);
+    if (!dedupAppMap[gid] || (d && d < parseDate(dedupAppMap[gid].date))) dedupAppMap[gid] = r;
+  });
+  const dedupAppRows = Object.values(dedupAppMap);
   // Earliest completed showing per inquiry (search ALL showings)
   const compShByInqId = {};
   lfShRows.filter(r => r.inq_id && /complet/i.test(r.status)).forEach(r => {
     const d = parseDate(r.date);
     if (d && (!compShByInqId[r.inq_id] || d < compShByInqId[r.inq_id])) compShByInqId[r.inq_id] = d;
   });
-  const shToAppTimes = appRows
+  const shToAppTimes = dedupAppRows
     .filter(r => r.inq_id && compShByInqId[r.inq_id])
     .map(r => {
       const ad = parseDate(r.date);
       return (ad && compShByInqId[r.inq_id]) ? (ad - compShByInqId[r.inq_id]) / 864e5 : null;
     }).filter(v => v !== null && v >= 0);
   const avgShToApp = shToAppTimes.length ? shToAppTimes.reduce((a,b)=>a+b,0) / shToAppTimes.length : null;
-  // Application received → decision (for approved apps only)
-  const pendToApprTimes = appRows
+  // Application received → decision (for approved apps only, one row per group)
+  const pendToApprTimes = dedupAppRows
     .filter(r => /approv/i.test(r.status) && r.decision_dt)
     .map(r => {
       const ad = parseDate(r.date), dd = parseDate(r.decision_dt);
@@ -2586,9 +2601,9 @@ function renderLFCards() {
   });
   const depConv = approvedGroupIds.size > 0 ? Math.round(convertedGroups.length / approvedGroupIds.size * 100) : null;
 
-  // Avg approval→deposit: anchored on approved apps in current filter window
+  // Avg approval→deposit: anchored on approved apps in current filter window (one per group)
   // For each, find the earliest deposit on that unit on or after the approval date
-  const apprToDepTimes = appRows
+  const apprToDepTimes = dedupAppRows
     .filter(r => /approv/i.test(r.status) && r.decision_dt && r.property && r.unit)
     .map(r => {
       const ad = parseDate(r.decision_dt);
