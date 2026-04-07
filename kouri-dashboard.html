@@ -2873,16 +2873,16 @@ function renderLFDetail() {
     const depKeysSample = src.slice(0,10).map(r => `${r.pod}|${normUnit(r.unit)}`);
     console.log('[DEP] keys sample:', depKeysSample);
     console.log('[SMI] total rows:', lfSMIRows.length, '| lookup entries:', Object.keys(depMoveInLookup).length);
-    // Application date lookup: for each property+unit, find the most recent app date
-    // using name-token matching against payee so we tie the right application to each deposit
+    // Application date lookup: store ALL apps per property+unit
+    // so we can name-match against any applicant, not just the most recent
     const appDateLookup = {};
     lfAppRows.forEach(a => {
       if (!a.property || !a.unit) return;
       const key = `${a.property}|${a.unit}`;
       const d = parseDate(a.date);
       if (!d) return;
-      if (!appDateLookup[key] || d > appDateLookup[key].date)
-        appDateLookup[key] = { date: d, str: a.date, prospect: a.prospect };
+      if (!appDateLookup[key]) appDateLookup[key] = [];
+      appDateLookup[key].push({ date: d, str: a.date, prospect: a.prospect });
     });
     head = `<tr>
       <th onclick="lfDetSort('date')">Posted Date</th>
@@ -2933,14 +2933,15 @@ function renderLFDetail() {
     body = src.map(r => {
       const mi = depMoveInLookup[`${r.pod}|${normUnit(r.unit)}`];
       const miStr = mi ? fmtDate(mi.str) : '—';
-      // Application date: match by property+unit, validate payee name overlaps applicant
-      const appLookup = appDateLookup[`${r.property}|${r.unit}`];
+      // Application date: search all apps for this property+unit, pick the one whose
+      // applicant name shares a token with the deposit payee
+      const appList = appDateLookup[`${r.property}|${r.unit}`] || [];
       const payeeNameToks = (r.payee||'').toLowerCase().split(/[\s,\.]+/).filter(t=>t.length>=3);
-      const appNameMatch = appLookup && appLookup.prospect
-        ? (appLookup.prospect||'').toLowerCase().split(/[\s,\.]+/).filter(t=>t.length>=3)
-            .some(t => payeeNameToks.includes(t))
-        : false;
-      const appDateStr = (appLookup && appNameMatch) ? fmtDate(appLookup.str) : '—';
+      const matchedApp = appList.find(a => {
+        const aToks = (a.prospect||'').toLowerCase().split(/[\s,\.]+/).filter(t=>t.length>=3);
+        return aToks.some(t => payeeNameToks.includes(t));
+      });
+      const appDateStr = matchedApp ? fmtDate(matchedApp.str) : '—';
       const depKey = r.payee ? `${r.property}|${r.unit}|${r.payee}` : r.txn_id;
       const isSplit = splitKeys.has(depKey);
       const pal     = isSplit ? GROUP_PALETTES[depColorIdx[depKey]] : null;
