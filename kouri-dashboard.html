@@ -20,61 +20,87 @@ body {
 }
 /* ─── Header ─── */
 .header {
-  background: #006140;
+  background: linear-gradient(135deg, #0d1b2a 0%, #162236 100%);
   color: white;
-  padding: 12px 28px;
+  padding: 0 28px;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: space-between;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+  box-shadow: 0 2px 16px rgba(0,0,0,0.45);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
   position: sticky;
   top: 0;
   z-index: 100;
+  min-height: 62px;
 }
-.header-brand { display: flex; align-items: center; gap: 18px; }
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  border-right: 1px solid rgba(255,255,255,0.08);
+  padding: 12px 28px 12px 0;
+  position: relative;
+}
+.header-brand::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #006140, #00a86b, transparent);
+  border-radius: 0;
+}
 .header-logo-img {
-  height: 44px;
+  height: 40px;
   width: auto;
   display: block;
-  filter: brightness(0) invert(1);
+  filter: drop-shadow(0 1px 4px rgba(0,180,100,0.25));
 }
 .header-divider {
   width: 1px;
-  height: 36px;
-  background: rgba(255,255,255,0.3);
+  height: 32px;
+  background: rgba(255,255,255,0.15);
 }
-.header-title { font-size: 15px; font-weight: 700; letter-spacing: 0.2px; opacity: 0.95; }
+.header-title { font-size: 15px; font-weight: 700; letter-spacing: 0.2px; color: #fff; }
 .header-sub {
-  font-size: 11px;
-  letter-spacing: 1.5px;
+  font-size: 10px;
+  letter-spacing: 2px;
   text-transform: uppercase;
-  opacity: 0.6;
-  margin-top: 2px;
+  color: rgba(255,255,255,0.45);
+  margin-top: 3px;
   font-weight: 500;
 }
-.header-meta { font-size: 11px; opacity: 0.7; text-align: right; }
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 12px 0 12px 28px;
+}
+.header-meta { font-size: 11px; color: rgba(255,255,255,0.5); text-align: right; }
 #refreshBtn {
   display: flex;
   align-items: center;
   gap: 7px;
-  background: rgba(255,255,255,0.12);
-  border: 1px solid rgba(255,255,255,0.3);
-  color: white;
-  padding: 7px 16px;
+  background: rgba(0,97,64,0.5);
+  border: 1px solid rgba(0,168,107,0.5);
+  color: #7eeec4;
+  padding: 7px 18px;
   border-radius: 20px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.18s, border-color 0.18s, transform 0.1s;
+  transition: background 0.18s, border-color 0.18s, transform 0.1s, color 0.18s;
   letter-spacing: 0.2px;
 }
 #refreshBtn:hover {
-  background: rgba(255,255,255,0.22);
-  border-color: rgba(255,255,255,0.5);
+  background: rgba(0,97,64,0.8);
+  border-color: rgba(0,168,107,0.9);
+  color: #b6f5de;
   transform: translateY(-1px);
 }
 #refreshBtn:active { transform: translateY(0); }
-#refreshBtn:disabled { opacity: 0.55; cursor: default; transform: none; }
+#refreshBtn:disabled { opacity: 0.45; cursor: default; transform: none; }
 #refreshBtnIcon { font-size: 15px; line-height: 1; }
 /* ─── Tabs ─── */
 .tab-bar {
@@ -245,6 +271,8 @@ tbody tr {
 tbody tr:hover    { background: #f5faf7; }
 tbody tr.selected { background: #e6f4ed !important; }
 tbody tr.selected td { font-weight: 500; }
+tbody tr.active-row { background: #e0f2e9 !important; box-shadow: inset 4px 0 0 #006140; }
+tbody tr.active-row td { font-weight: 700 !important; }
 tbody td { padding: 9px 14px; color: #333; }
 /* ─── Badges ─── */
 .badge {
@@ -329,7 +357,7 @@ tbody td { padding: 9px 14px; color: #333; }
       <div class="header-sub">Regional Dashboard</div>
     </div>
   </div>
-  <div style="display: flex; align-items: center; gap: 18px;">
+  <div class="header-right">
     <div class="header-meta" id="lastUpdated">Loading data…</div>
     <button id="refreshBtn" title="Sync data from AppFolio">
       <span id="refreshBtnIcon">⟳</span> Refresh
@@ -2327,17 +2355,29 @@ function renderLFPods() {
     return typeof av === 'string' ? av.localeCompare(bv) * dir : (av - bv) * dir;
   });
   $('lf-pod-pill').textContent = pods.length + ' POD' + (pods.length !== 1 ? 's' : '');
+  const numCell = (val, color, bg) => {
+    const display = (val || val === 0) ? val : '—';
+    const hasVal  = val > 0;
+    const style   = [
+      'text-align:center',
+      'font-size:15px',
+      'font-weight:700',
+      hasVal && color ? `color:${color}` : 'color:#bbb',
+      hasVal && bg    ? `background:${bg};border-radius:6px` : '',
+    ].filter(Boolean).join(';');
+    return `<td style="${style}">${display}</td>`;
+  };
   $('lf-pod-body').innerHTML = pods.map(p => {
     const isActive = lfPOD === p.pod;
-    const showingStr = p.showings_total > 0 ? `${p.showings_comp} / ${p.showings_total}` : '—';
+    const showingStr = p.showings_total > 0 ? `${p.showings_comp}/${p.showings_total}` : null;
     return `<tr class="${isActive ? 'active-row' : ''}" onclick="selectLFPOD('${p.pod.replace(/'/g,"\\'")}')">
-      <td><strong>${p.pod}</strong></td>
-      <td style="text-align:center">${p.inquiries}</td>
-      <td style="text-align:center">${showingStr}</td>
-      <td style="text-align:center">${p.apps || '—'}</td>
-      <td style="text-align:center">${p.pending || '—'}</td>
-      <td style="text-align:center;color:#2e7d32">${p.approved || '—'}</td>
-      <td style="text-align:center;color:#1565c0">${p.deposits || '—'}</td>
+      <td style="font-size:13px;font-weight:600;white-space:nowrap">${p.pod}</td>
+      ${numCell(p.inquiries,      '#1565c0', '#e8f0fe')}
+      <td style="text-align:center;font-size:15px;font-weight:700;color:${p.showings_total > 0 ? '#6a1b9a' : '#bbb'}">${showingStr || '—'}</td>
+      ${numCell(p.apps,           '#e65100', '#fff3e0')}
+      ${numCell(p.pending,        '#f57c00', '#fff8e1')}
+      ${numCell(p.approved,       '#2e7d32', '#e8f5e9')}
+      ${numCell(p.deposits,       '#00695c', '#e0f2f1')}
     </tr>`;
   }).join('');
 }
