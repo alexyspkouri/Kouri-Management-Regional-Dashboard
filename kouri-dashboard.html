@@ -2233,6 +2233,7 @@ function fmtMins(v) {
 // Format days → "Xd" / "Xh" (if < 1 day)
 function fmtDays(v) {
   if (v === null || v === undefined) return '—';
+  if (v === 0) return '0d';
   if (v < 1) return `${Math.round(v * 24)}h`;
   return `${v.toFixed(1)}d`;
 }
@@ -2592,14 +2593,16 @@ function renderLFCards() {
     .map(r => {
       const ad = parseDate(r.decision_dt);
       if (!ad) return null;
+      // Strip time component — decision_dt has HH:MM:SS but deposit dates are midnight
+      const adDay = new Date(ad.getFullYear(), ad.getMonth(), ad.getDate());
       const earliest = lfDepRows
         .filter(d => d.property === r.property && d.unit === r.unit)
         .map(d => parseDate(d.date))
-        .filter(d => d && d >= ad)
+        .filter(d => d && d >= adDay)
         .sort((a, b) => a - b)[0];
-      return earliest ? (earliest - ad) / 864e5 : null;
+      return earliest ? (earliest - adDay) / 864e5 : null;
     }).filter(v => v !== null && v >= 0);
-  const avgApprToDep = apprToDepTimes.length ? apprToDepTimes.reduce((a,b)=>a+b,0) / apprToDepTimes.length : null;
+  const avgApprToDep = apprToDepTimes.length ? apprToDepTimes.reduce((a,b)=>a+b,0) / apprToDepTimes.length : 0;
 
   // Avg deposit→move-in: tickler-based lookup by POD+normUnit
   // POD is consistent across data sources; unit normalized to strip "Unit "/"Apt " prefixes
