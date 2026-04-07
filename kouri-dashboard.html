@@ -2806,7 +2806,7 @@ function renderLFDetail() {
       return av.localeCompare(bv) * lfDetSrt.dir;
     });
 
-    colspan = 10;
+    colspan = 9;
     head = `<tr>
       <th onclick="lfDetSort('date')">App Date</th>
       <th onclick="lfDetSort('prospect')">Applicant</th>
@@ -2816,7 +2816,6 @@ function renderLFDetail() {
       <th onclick="lfDetSort('status')">Status</th>
       <th onclick="lfDetSort('decision_dt')">Status Date</th>
       <th style="text-align:center" onclick="lfDetSort('decision_dt')">Days to Status</th>
-      <th onclick="lfDetSort('reason')">Reason</th>
       <th onclick="lfDetSort('dep_date')">Deposit Paid</th>
     </tr>`;
     // Assign a distinct pastel color palette slot to each multi-member group
@@ -2861,7 +2860,6 @@ function renderLFDetail() {
         <td style="color:${stColor};font-weight:600">${st}</td>
         <td style="font-size:12px;color:#555">${decDt ? fmtDate(decDt) : '—'}</td>
         <td style="text-align:center;font-size:12px;color:#555">${daysStr}</td>
-        <td style="color:#666;font-size:12px">${r.reason || '—'}</td>
         <td style="color:${depMatch ? '#2e7d32' : '#bbb'};font-weight:600">${depMatch ? fmtDate(depMatch.toISOString().slice(0,10)) : ''}</td>
       </tr>`;
     }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
