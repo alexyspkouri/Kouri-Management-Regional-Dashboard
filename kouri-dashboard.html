@@ -102,6 +102,57 @@ body {
 #refreshBtn:active { transform: translateY(0); }
 #refreshBtn:disabled { opacity: 0.45; cursor: default; transform: none; }
 #refreshBtnIcon { font-size: 15px; line-height: 1; }
+/* ─── Sync Progress Bar ─── */
+#sync-progress {
+  position: fixed;
+  top: 62px;
+  left: 0;
+  right: 0;
+  z-index: 99;
+  background: #0f2236;
+  border-bottom: 1px solid rgba(0,168,107,0.25);
+  padding: 7px 28px;
+  display: none;
+  align-items: center;
+  gap: 14px;
+}
+#sync-progress.visible { display: flex; }
+#sync-bar-track {
+  flex: 1;
+  height: 6px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+#sync-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #00a86b, #7eeec4);
+  border-radius: 4px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+#sync-bar-fill.done {
+  background: #7eeec4;
+  transition: width 0.3s ease-out;
+}
+#sync-bar-fill.error {
+  background: #ef5350;
+  transition: width 0.3s ease-out;
+}
+#sync-step-label {
+  font-size: 11px;
+  color: rgba(255,255,255,0.65);
+  white-space: nowrap;
+  min-width: 220px;
+  letter-spacing: 0.2px;
+}
+#sync-pct-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #7eeec4;
+  min-width: 36px;
+  text-align: right;
+}
 /* ─── Tabs ─── */
 .tab-bar {
   background: white;
@@ -363,6 +414,12 @@ tbody td { padding: 9px 14px; color: #333; }
       <span id="refreshBtnIcon">⟳</span> Refresh
     </button>
   </div>
+</div>
+<!-- Sync Progress Bar -->
+<div id="sync-progress">
+  <div id="sync-bar-track"><div id="sync-bar-fill"></div></div>
+  <span id="sync-step-label">Starting sync…</span>
+  <span id="sync-pct-label">0%</span>
 </div>
 <!-- Tabs -->
 <div class="tab-bar">
@@ -2108,15 +2165,15 @@ let lfDetSrt = { col: 'date', dir: -1 };
 // ── Date helpers ─────────────────────────────────────────────────────
 function getLFDateBounds(key) {
   const today = new Date(); today.setHours(23,59,59,999);
-  const dow = today.getDay(); // 0=Sun
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1));
-  monday.setHours(0,0,0,0);
-  if (key === 'cw') return { from: monday, to: today };
+  const dow = today.getDay(); // 0=Sun, 1=Mon … 6=Sat
+  const sunday = new Date(today);
+  sunday.setDate(today.getDate() - dow); // back to this week's Sunday
+  sunday.setHours(0,0,0,0);
+  if (key === 'cw') return { from: sunday, to: today };
   if (key === 'lw') {
-    const lMon = new Date(monday); lMon.setDate(monday.getDate() - 7);
-    const lSun = new Date(monday); lSun.setDate(monday.getDate() - 1); lSun.setHours(23,59,59,999);
-    return { from: lMon, to: lSun };
+    const lSun = new Date(sunday); lSun.setDate(sunday.getDate() - 7);
+    const lSat = new Date(sunday); lSat.setDate(sunday.getDate() - 1); lSat.setHours(23,59,59,999);
+    return { from: lSun, to: lSat };
   }
   return { from: new Date(today.getFullYear(), today.getMonth(), 1), to: today };
 }
@@ -2229,6 +2286,17 @@ async function loadLFDep() {
     reference  : r['Reference']          || '',
     txn_id     : r['Transaction ID']     || '',
   }));
+  // Debug: open browser console to inspect what loaded
+  console.log('[LF Deposits] Total rows:', lfDepRows.length);
+  if (lfDepRows.length > 0) {
+    const pods   = [...new Set(lfDepRows.map(r => r.pod))].sort().join(', ');
+    const sample = lfDepRows.slice(0, 3).map(r => `${r.property} | ${r.pod} | ${r.date}`).join('\n  ');
+    console.log('[LF Deposits] PODs found:', pods);
+    console.log('[LF Deposits] First rows:\n ', sample);
+    const today = new Date(); const cw = getLFDateBounds('cw');
+    const inCW  = lfDepRows.filter(r => { const d = parseDate(r.date); if(!d) return false; d.setHours(12); return d >= cw.from && d <= cw.to; });
+    console.log('[LF Deposits] In current week:', inCW.length, inCW.map(r => `${r.property}(${r.pod})`).join(', '));
+  }
 }
 
 // ── State setters ─────────────────────────────────────────────────────
@@ -2499,29 +2567,101 @@ function renderLFDetail() {
   const CLOUD_FUNCTION_URL = 'https://us-central1-appfolio-dashboard-491122.cloudfunctions.net/sync_appfolio_data';
   const refreshBtn = document.getElementById('refreshBtn');
   if (refreshBtn) {
-      refreshBtn.addEventListener('click', async function() {
-            const originalText = refreshBtn.textContent;
-            refreshBtn.textContent = '⟳ Syncing...';
-            refreshBtn.disabled = true;
-            try {
-                    const response = await fetch(CLOUD_FUNCTION_URL, { method: 'POST' });
-                    const result = await response.json();
-                    if (response.ok) {
-                              refreshBtn.textContent = '✓ Synced!';
-                              setTimeout(() => { location.reload(); }, 1000);
-                    } else {
-                              refreshBtn.textContent = '❌ Sync failed';
-                              console.error('Sync error:', result);
-                    }
-            } catch (error) {
-                    refreshBtn.textContent = '❌ Error';
-                    console.error('Request error:', error);
-            }
-            setTimeout(() => {
-                    refreshBtn.textContent = originalText;
-                    refreshBtn.disabled = false;
-            }, 3000);
+    // Sync progress simulation — 13 steps with estimated durations (seconds)
+    const SYNC_STEPS = [
+      { label: 'Step 1/13 · Delinquency report',    dur: 6  },
+      { label: 'Step 2/13 · Work orders',            dur: 5  },
+      { label: 'Step 3/13 · Rent roll',              dur: 7  },
+      { label: 'Step 4/13 · Move ins / move outs',   dur: 5  },
+      { label: 'Step 5/13 · Renewals',               dur: 4  },
+      { label: 'Step 6/13 · Occupancy metrics',      dur: 5  },
+      { label: 'Step 7/13 · Leasing agents',         dur: 4  },
+      { label: 'Step 8/13 · Retention',              dur: 6  },
+      { label: 'Step 9/13 · Retention monthly',      dur: 5  },
+      { label: 'Step 10/13 · Guest cards',           dur: 7  },
+      { label: 'Step 11/13 · Showings',              dur: 5  },
+      { label: 'Step 12/13 · Applications',          dur: 6  },
+      { label: 'Step 13/13 · Security deposits GL',  dur: 5  },
+    ];
+    const TOTAL_DUR = SYNC_STEPS.reduce((s, x) => s + x.dur, 0);  // ~75s
+
+    let syncTimers = [];
+    function clearSyncTimers() { syncTimers.forEach(clearTimeout); syncTimers = []; }
+
+    function startProgressBar() {
+      const bar   = $('sync-bar-fill');
+      const label = $('sync-step-label');
+      const pct   = $('sync-pct-label');
+      const prog  = $('sync-progress');
+
+      bar.className = '';
+      bar.style.width = '0%';
+      label.textContent = 'Connecting to AppFolio…';
+      pct.textContent = '0%';
+      prog.classList.add('visible');
+
+      // Walk through steps, capping at 90% until real response arrives
+      let elapsed = 0;
+      SYNC_STEPS.forEach((step, i) => {
+        const t = setTimeout(() => {
+          const progress = Math.min(((elapsed + step.dur) / TOTAL_DUR) * 90, 90);
+          bar.style.width = progress.toFixed(1) + '%';
+          label.textContent = step.label;
+          pct.textContent = Math.round(progress) + '%';
+        }, elapsed * 1000);
+        syncTimers.push(t);
+        elapsed += step.dur;
       });
+    }
+
+    function finishProgressBar(success) {
+      clearSyncTimers();
+      const bar   = $('sync-bar-fill');
+      const label = $('sync-step-label');
+      const pct   = $('sync-pct-label');
+      const prog  = $('sync-progress');
+
+      bar.style.width = '100%';
+      bar.className = success ? 'done' : 'error';
+      pct.style.color = success ? '#7eeec4' : '#ef9a9a';
+      pct.textContent = '100%';
+      label.textContent = success ? '✓ Sync complete — reloading…' : '✕ Sync failed';
+
+      setTimeout(() => {
+        prog.classList.remove('visible');
+        bar.style.width = '0%';
+        bar.className = '';
+        pct.style.color = '';
+      }, success ? 1200 : 3500);
+    }
+
+    refreshBtn.addEventListener('click', async function() {
+      refreshBtn.innerHTML = '<span id="refreshBtnIcon">⟳</span> Syncing…';
+      refreshBtn.disabled = true;
+      startProgressBar();
+      try {
+        const response = await fetch(CLOUD_FUNCTION_URL, { method: 'POST' });
+        const result   = await response.json();
+        if (response.ok) {
+          finishProgressBar(true);
+          setTimeout(() => location.reload(), 1200);
+        } else {
+          finishProgressBar(false);
+          console.error('Sync error:', result);
+          setTimeout(() => {
+            refreshBtn.innerHTML = '<span id="refreshBtnIcon">⟳</span> Refresh';
+            refreshBtn.disabled = false;
+          }, 3500);
+        }
+      } catch (error) {
+        finishProgressBar(false);
+        console.error('Request error:', error);
+        setTimeout(() => {
+          refreshBtn.innerHTML = '<span id="refreshBtnIcon">⟳</span> Refresh';
+          refreshBtn.disabled = false;
+        }, 3500);
+      }
+    });
   }
   const loaders = [loadDQ(), loadWO()];
   if (GIDS.receipts !== '000000000') {
