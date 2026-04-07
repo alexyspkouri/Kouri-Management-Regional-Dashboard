@@ -2270,8 +2270,9 @@ async function loadLFGC() {
     source       : r['Source']               || '',
     inq_type     : r['Inquiry Type']         || '',
     status       : r['Status']               || '',
-    texts_sent   : r['Texts Sent']           || '',
+    texts_sent      : r['Texts Sent']           || '',
     time_to_contact : r['Time to 1st Contact'] || '',
+    touch_points    : r['Touch Points']         || '',
     email        : r['Email']                || '',
     phone        : r['Phone']                || '',
     move_in      : r['Move In Date']         || '',
@@ -2407,10 +2408,16 @@ function lfAggByPOD() {
     if (/approv/i.test(r.status)) m.approved++;
   });
   Object.entries(podAppGroups).forEach(([pod, groups]) => { map[pod].apps = groups.size; });
-  // Deposits — GL 1160 posted date
+  // Deposits — deduplicate by property+unit+payee (split payments count as one)
+  const podDepKeys = {};
   lfFilterDetail(lfDepRows, 'date').forEach(r => {
-    ensure(r.pod || 'Unknown').deposits++;
+    const pod = r.pod || 'Unknown';
+    ensure(pod);
+    if (!podDepKeys[pod]) podDepKeys[pod] = new Set();
+    const key = r.payee ? `${r.property}|${r.unit}|${r.payee}` : r.txn_id;
+    podDepKeys[pod].add(key);
   });
+  Object.entries(podDepKeys).forEach(([pod, keys]) => { map[pod].deposits = keys.size; });
   return Object.values(map);
 }
 
@@ -2444,11 +2451,18 @@ function renderLFCards() {
   const apps         = appRows.length;
   const appsPending  = appRows.filter(r => /decision pending|in review/i.test(r.status)).length;
   const appsApproved = appRows.filter(r => /approv/i.test(r.status)).length;
-  const deposits     = depRows.length;
+  // Deduplicate deposits by property+unit+payee — split payments count as one
+  const depKeySet = new Set(depRows.map(r => r.payee ? `${r.property}|${r.unit}|${r.payee}` : r.txn_id));
+  const deposits  = depKeySet.size;
 
   // ── Inquiries: avg time to first contact ─────────────────────────────
-  const ttcVals = gcRows.map(r => parseDuration(r.time_to_contact)).filter(v => v !== null && v >= 0);
-  const avgTTC  = ttcVals.length ? ttcVals.reduce((a,b)=>a+b,0) / ttcVals.length : null;
+  const ttcVals  = gcRows.map(r => parseDuration(r.time_to_contact)).filter(v => v !== null && v >= 0);
+  const avgTTC   = ttcVals.length ? ttcVals.reduce((a,b)=>a+b,0) / ttcVals.length : null;
+  const tpVals   = gcRows.map(r => parseFloat(r.touch_points)).filter(v => !isNaN(v) && v >= 0);
+  const avgTP    = tpVals.length ? tpVals.reduce((a,b)=>a+b,0) / tpVals.length : null;
+  const srcCounts = {};
+  gcRows.forEach(r => { if (r.source) srcCounts[r.source] = (srcCounts[r.source] || 0) + 1; });
+  const topSource = Object.keys(srcCounts).sort((a,b) => srcCounts[b] - srcCounts[a])[0] || null;
 
   // ── Showings: conv rate + avg GC→Showing days ────────────────────────
   const shConv = inquiries > 0 ? Math.round(shComp / inquiries * 100) : null;
@@ -2487,19 +2501,37 @@ function renderLFCards() {
     }).filter(v => v !== null && v >= 0);
   const avgPendToAppr = pendToApprTimes.length ? pendToApprTimes.reduce((a,b)=>a+b,0) / pendToApprTimes.length : null;
 
-  // ── Deposits: conv + approval→deposit days ───────────────────────────
-  // Unique application groups (each group = one tenancy application, regardless of co-applicants)
-  const appGroups = new Set(appRows.filter(r=>r.group_id).map(r=>r.group_id));
-  const depUnits  = new Set(depRows.filter(r=>r.property&&r.unit).map(r=>`${r.property}|${r.unit}`));
-  const depConv   = appGroups.size > 0 ? Math.round(depUnits.size / appGroups.size * 100) : null;
-  // Latest approved app decision_dt per property+unit (all approved apps, not date-filtered)
+  // ── Deposits: Option A — application-anchored conversion ────────────
+  // Denominator: unique group IDs in the filtered app period
+  const appGroups = new Set(appRows.filter(r => r.group_id).map(r => r.group_id));
+  // For each group, find the earliest app date and which property+unit they applied for
+  const groupInfo = {};
+  appRows.filter(r => r.group_id).forEach(r => {
+    const d = parseDate(r.date);
+    if (!groupInfo[r.group_id] || (d && d < groupInfo[r.group_id].appDate))
+      groupInfo[r.group_id] = { property: r.property, unit: r.unit, appDate: d };
+  });
+  // Numerator: groups where a deposit exists for same property+unit on or after the application date
+  // Searches ALL deposit records regardless of date filter so nothing is missed across weeks
+  const convertedGroups = [...appGroups].filter(gid => {
+    const info = groupInfo[gid];
+    if (!info || !info.property || !info.unit) return false;
+    return lfDepRows.some(dep => {
+      if (dep.property !== info.property || dep.unit !== info.unit) return false;
+      const dd = parseDate(dep.date);
+      return dd && (!info.appDate || dd >= info.appDate);
+    });
+  });
+  const depConv = appGroups.size > 0 ? Math.round(convertedGroups.length / appGroups.size * 100) : null;
+
+  // Avg approval→deposit: search all deposit records (not date-filtered) so timing isn't cut off
   const approvedByUnit = {};
   lfAppRows.filter(r => /approv/i.test(r.status) && r.decision_dt && r.property && r.unit).forEach(r => {
     const key = `${r.property}|${r.unit}`;
     const d = parseDate(r.decision_dt);
     if (d && (!approvedByUnit[key] || d > approvedByUnit[key])) approvedByUnit[key] = d;
   });
-  const apprToDepTimes = depRows
+  const apprToDepTimes = lfDepRows
     .filter(r => r.property && r.unit)
     .map(r => {
       const key = `${r.property}|${r.unit}`;
@@ -2517,6 +2549,8 @@ function renderLFCards() {
       <div class="card-value blue">${inquiries}</div>
       <div class="card-sub">guest cards received</div>
       ${m('Avg contact time', avgTTC !== null ? fmtMins(avgTTC) : null, 'time')}
+      ${m('Avg touch points', avgTP !== null ? avgTP.toFixed(1) : null, 'time')}
+      ${m('Top source', topSource, 'conv')}
     </div>
     <div class="card" onclick="setLFView('sh')" style="cursor:pointer">
       <div class="card-label">Showings</div>
@@ -2679,16 +2713,32 @@ function renderLFDetail() {
       return av.localeCompare(bv) * lfDetSrt.dir;
     });
 
-    colspan = 7;
+    colspan = 8;
     head = `<tr>
       <th onclick="lfDetSort('date')">App Date</th>
       <th onclick="lfDetSort('prospect')">Applicant</th>
+      <th onclick="lfDetSort('unit')">Unit</th>
       <th onclick="lfDetSort('property')">Property</th>
       <th onclick="lfDetSort('lead_source')">Lead Source</th>
       <th onclick="lfDetSort('status')">Status</th>
       <th onclick="lfDetSort('reason')">Reason</th>
       <th onclick="lfDetSort('screening')">Screening</th>
     </tr>`;
+    // Assign a distinct pastel color palette slot to each multi-member group
+    const GROUP_PALETTES = [
+      { bg:'#e8f4fd', border:'#1565c0', badge:'#1565c0' }, // blue
+      { bg:'#fce8f3', border:'#880e4f', badge:'#880e4f' }, // pink
+      { bg:'#e8f5e9', border:'#2e7d32', badge:'#2e7d32' }, // green
+      { bg:'#fff3e0', border:'#e65100', badge:'#e65100' }, // orange
+      { bg:'#f3e5f5', border:'#6a1b9a', badge:'#6a1b9a' }, // purple
+      { bg:'#e0f7fa', border:'#00695c', badge:'#00695c' }, // teal
+      { bg:'#fff8e1', border:'#f9a825', badge:'#b37700' }, // amber
+      { bg:'#fbe9e7', border:'#bf360c', badge:'#bf360c' }, // deep orange
+    ];
+    const grpColorIdx = {};
+    let colorCounter = 0;
+    [...multiGroups].forEach(g => { grpColorIdx[g] = colorCounter++ % GROUP_PALETTES.length; });
+
     const empty = lfAppRows.length === 0 && GIDS.lfApplications !== '000000000' ? 'Loading…' : 'No applications for this period';
     body = src.map(r => {
       const st  = r.status   || '—';
@@ -2696,11 +2746,13 @@ function renderLFDetail() {
       const stColor  = /approv/i.test(st)  ? '#2e7d32' : /denied|reject/i.test(st)  ? '#c62828' : /pending/i.test(st)  ? '#e65100' : '#555';
       const scrColor = /complet/i.test(scr) ? '#2e7d32' : /fail|adverse/i.test(scr) ? '#c62828' : /screen/i.test(scr) ? '#1565c0' : '#555';
       const isGrouped = r.group_id && multiGroups.has(r.group_id);
-      const rowStyle  = isGrouped ? 'background:#f5f0ff;border-left:3px solid #7c4dff' : '';
-      const badge     = isGrouped ? '<span style="font-size:10px;background:#7c4dff;color:#fff;border-radius:3px;padding:1px 5px;margin-left:6px;vertical-align:middle;font-weight:600">co-app</span>' : '';
+      const pal       = isGrouped ? GROUP_PALETTES[grpColorIdx[r.group_id]] : null;
+      const rowStyle  = pal ? `background:${pal.bg};border-left:3px solid ${pal.border}` : '';
+      const badge     = pal ? `<span style="font-size:10px;background:${pal.badge};color:#fff;border-radius:3px;padding:1px 5px;margin-left:6px;vertical-align:middle;font-weight:600">co-app</span>` : '';
       return `<tr style="${rowStyle}">
         <td>${fmtDate(r.date)}</td>
         <td>${r.prospect || '—'}${badge}</td>
+        <td style="font-size:12px;color:#555">${r.unit || '—'}</td>
         <td>${r.property || '—'}</td>
         <td>${r.lead_source || '—'}</td>
         <td style="color:${stColor};font-weight:600">${st}</td>
