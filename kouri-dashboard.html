@@ -2823,10 +2823,18 @@ function renderLFDetail() {
     body = src.map(r => {
       const st  = r.status   || '—';
       const stColor  = /approv/i.test(st)  ? '#2e7d32' : /denied|reject/i.test(st)  ? '#c62828' : /pending/i.test(st)  ? '#e65100' : '#555';
-      // Deposit paid date: earliest deposit for this property+unit on or after the application date
+      // Deposit paid date: match property+unit+date AND validate payee name overlaps applicant
+      // Name match: split both into tokens (3+ chars), check for any common token (case-insensitive)
       const appDate = parseDate(r.date);
+      const nameToks = (r.prospect || '').toLowerCase().split(/[\s,\.]+/).filter(t => t.length >= 3);
+      const nameMatch = (payee) => {
+        if (!payee) return false;
+        const ptoks = payee.toLowerCase().split(/[\s,\.]+/).filter(t => t.length >= 3);
+        return nameToks.some(t => ptoks.includes(t));
+      };
       const depMatch = r.property && r.unit
-        ? lfDepRows.filter(d => d.property === r.property && d.unit === r.unit)
+        ? lfDepRows
+            .filter(d => d.property === r.property && d.unit === r.unit && nameMatch(d.payee))
             .map(d => parseDate(d.date)).filter(d => d && (!appDate || d >= appDate))
             .sort((a,b) => a-b)[0]
         : null;
@@ -2865,16 +2873,28 @@ function renderLFDetail() {
     const depKeysSample = src.slice(0,10).map(r => `${r.pod}|${normUnit(r.unit)}`);
     console.log('[DEP] keys sample:', depKeysSample);
     console.log('[SMI] total rows:', lfSMIRows.length, '| lookup entries:', Object.keys(depMoveInLookup).length);
+    // Application date lookup: for each property+unit, find the most recent app date
+    // using name-token matching against payee so we tie the right application to each deposit
+    const appDateLookup = {};
+    lfAppRows.forEach(a => {
+      if (!a.property || !a.unit) return;
+      const key = `${a.property}|${a.unit}`;
+      const d = parseDate(a.date);
+      if (!d) return;
+      if (!appDateLookup[key] || d > appDateLookup[key].date)
+        appDateLookup[key] = { date: d, str: a.date, prospect: a.prospect };
+    });
     head = `<tr>
       <th onclick="lfDetSort('date')">Posted Date</th>
       <th onclick="lfDetSort('payee')">Payee</th>
       <th onclick="lfDetSort('unit')">Unit</th>
       <th onclick="lfDetSort('property')">Property</th>
       <th onclick="lfDetSort('reference')">Reference</th>
+      <th style="text-align:center">App Date</th>
       <th style="text-align:center">Move In</th>
       <th onclick="lfDetSort('amount')" style="text-align:right">Amount</th>
     </tr>`;
-    colspan = 7;
+    colspan = 8;
 
     // Identify split payments: same property+unit+payee appearing more than once
     const depKeyCounts = {};
@@ -2913,6 +2933,14 @@ function renderLFDetail() {
     body = src.map(r => {
       const mi = depMoveInLookup[`${r.pod}|${normUnit(r.unit)}`];
       const miStr = mi ? fmtDate(mi.str) : '—';
+      // Application date: match by property+unit, validate payee name overlaps applicant
+      const appLookup = appDateLookup[`${r.property}|${r.unit}`];
+      const payeeNameToks = (r.payee||'').toLowerCase().split(/[\s,\.]+/).filter(t=>t.length>=3);
+      const appNameMatch = appLookup && appLookup.prospect
+        ? (appLookup.prospect||'').toLowerCase().split(/[\s,\.]+/).filter(t=>t.length>=3)
+            .some(t => payeeNameToks.includes(t))
+        : false;
+      const appDateStr = (appLookup && appNameMatch) ? fmtDate(appLookup.str) : '—';
       const depKey = r.payee ? `${r.property}|${r.unit}|${r.payee}` : r.txn_id;
       const isSplit = splitKeys.has(depKey);
       const pal     = isSplit ? GROUP_PALETTES[depColorIdx[depKey]] : null;
@@ -2924,6 +2952,7 @@ function renderLFDetail() {
         <td style="font-size:12px;color:#555">${r.unit||'—'}</td>
         <td>${r.property||'—'}</td>
         <td>${r.reference||'—'}</td>
+        <td style="text-align:center;font-size:12px;color:#1565c0">${appDateStr}</td>
         <td style="text-align:center;font-size:12px;color:#2e7d32;font-weight:600">${miStr}</td>
         <td style="text-align:right;color:#1565c0;font-weight:600">${fmtAmt(r.amount)}</td>
       </tr>`;
