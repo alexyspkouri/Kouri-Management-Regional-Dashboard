@@ -918,7 +918,7 @@ function fetchGViz(gid) {
     };
     const s = document.createElement('script');
     s.onerror = () => { clearTimeout(timer); delete window[cb]; reject(new Error('Script load failed')); };
-    s.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=responseHandler:${cb}&gid=${gid}`;
+    s.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=responseHandler:${cb}&gid=${gid}&headers=1`;
     document.head.appendChild(s);
   });
 }
@@ -2369,6 +2369,20 @@ async function loadLFDep() {
 async function loadLFSMI() {
   if (GIDS.lfSchedMoveIns === '000000000') return;
   const raw = await fetchGViz(GIDS.lfSchedMoveIns);
+  if (raw.length > 0) {
+    console.log('[LF SMI] Actual columns:', Object.keys(raw[0]));
+    // If GVIZ returned col letters (A,B,...) instead of header labels, remap by position
+    const firstKey = Object.keys(raw[0])[0];
+    if (firstKey && firstKey.length <= 2 && /^[A-Z]+$/.test(firstKey)) {
+      console.warn('[LF SMI] GVIZ returned column letters — remapping by position');
+      raw = raw.map(r => {
+        const vals = Object.values(r);
+        return { Property: vals[0]||'', POD: vals[1]||'', Unit: vals[2]||'',
+                 Tenant: vals[3]||'', 'Move In Date': vals[4]||'',
+                 'Move Out Date': vals[5]||'', Status: vals[6]||'' };
+      });
+    }
+  }
   lfSMIRows = raw.map(r => ({
     property  : r['Property']      || '',
     pod       : r['POD']           || '',
@@ -2547,18 +2561,20 @@ function renderLFCards() {
   const avgPendToAppr = pendToApprTimes.length ? pendToApprTimes.reduce((a,b)=>a+b,0) / pendToApprTimes.length : null;
 
   // ── Deposits: Option A — application-anchored conversion ────────────
-  // Denominator: unique group IDs in the filtered app period
-  const appGroups = new Set(appRows.filter(r => r.group_id).map(r => r.group_id));
-  // For each group, find the earliest app date and which property+unit they applied for
+  // Denominator: unique group IDs with an APPROVED application in the filtered period
+  const approvedGroupIds = new Set(
+    appRows.filter(r => r.group_id && /approv/i.test(r.status)).map(r => r.group_id)
+  );
+  // For each approved group, record property+unit and the earliest application received date
   const groupInfo = {};
-  appRows.filter(r => r.group_id).forEach(r => {
+  appRows.filter(r => r.group_id && approvedGroupIds.has(r.group_id)).forEach(r => {
     const d = parseDate(r.date);
     if (!groupInfo[r.group_id] || (d && d < groupInfo[r.group_id].appDate))
       groupInfo[r.group_id] = { property: r.property, unit: r.unit, appDate: d };
   });
-  // Numerator: groups where a deposit exists for same property+unit on or after the application date
+  // Numerator: approved groups where a deposit exists on or after the application received date
   // Searches ALL deposit records regardless of date filter so nothing is missed across weeks
-  const convertedGroups = [...appGroups].filter(gid => {
+  const convertedGroups = [...approvedGroupIds].filter(gid => {
     const info = groupInfo[gid];
     if (!info || !info.property || !info.unit) return false;
     return lfDepRows.some(dep => {
@@ -2567,7 +2583,7 @@ function renderLFCards() {
       return dd && (!info.appDate || dd >= info.appDate);
     });
   });
-  const depConv = appGroups.size > 0 ? Math.round(convertedGroups.length / appGroups.size * 100) : null;
+  const depConv = approvedGroupIds.size > 0 ? Math.round(convertedGroups.length / approvedGroupIds.size * 100) : null;
 
   // Avg approval→deposit: anchored on approved apps in current filter window
   // For each, find the earliest deposit on that unit on or after the approval date
@@ -2634,7 +2650,7 @@ function renderLFCards() {
       <div class="card-label">Deposits</div>
       <div class="card-value green">${deposits}</div>
       <div class="card-sub">security deposits collected</div>
-      ${m('Conv from applications', depConv !== null ? depConv + '%' : null, 'conv')}
+      ${m('Conv from approved apps', depConv !== null ? depConv + '%' : null, 'conv')}
       ${m('Avg approval→deposit', avgApprToDep !== null ? fmtDays(avgApprToDep) : null, 'time')}
       ${m('Avg deposit→move-in', avgDepToMoveIn !== null ? fmtDays(avgDepToMoveIn) : null, 'time')}
     </div>
@@ -2796,7 +2812,7 @@ function renderLFDetail() {
       <th onclick="lfDetSort('lead_source')">Lead Source</th>
       <th onclick="lfDetSort('status')">Status</th>
       <th onclick="lfDetSort('reason')">Reason</th>
-      <th onclick="lfDetSort('screening')">Screening</th>
+      <th onclick="lfDetSort('dep_date')">Deposit Paid</th>
     </tr>`;
     // Assign a distinct pastel color palette slot to each multi-member group
     const grpColorIdx = {};
@@ -2806,9 +2822,12 @@ function renderLFDetail() {
     const empty = lfAppRows.length === 0 && GIDS.lfApplications !== '000000000' ? 'Loading…' : 'No applications for this period';
     body = src.map(r => {
       const st  = r.status   || '—';
-      const scr = r.screening || '—';
       const stColor  = /approv/i.test(st)  ? '#2e7d32' : /denied|reject/i.test(st)  ? '#c62828' : /pending/i.test(st)  ? '#e65100' : '#555';
-      const scrColor = /complet/i.test(scr) ? '#2e7d32' : /fail|adverse/i.test(scr) ? '#c62828' : /screen/i.test(scr) ? '#1565c0' : '#555';
+      // Deposit paid date: earliest deposit for this property+unit in ALL deposit records
+      const depMatch = r.property && r.unit
+        ? lfDepRows.filter(d => d.property === r.property && d.unit === r.unit)
+            .map(d => parseDate(d.date)).filter(Boolean).sort((a,b) => a-b)[0]
+        : null;
       const isGrouped = r.group_id && multiGroups.has(r.group_id);
       const pal       = isGrouped ? GROUP_PALETTES[grpColorIdx[r.group_id]] : null;
       const rowStyle  = pal ? `background:${pal.bg};border-left:3px solid ${pal.border}` : '';
@@ -2821,7 +2840,7 @@ function renderLFDetail() {
         <td>${r.lead_source || '—'}</td>
         <td style="color:${stColor};font-weight:600">${st}</td>
         <td style="color:#666;font-size:12px">${r.reason || '—'}</td>
-        <td style="color:${scrColor};font-weight:600">${scr}</td>
+        <td style="color:${depMatch ? '#2e7d32' : '#bbb'};font-weight:600">${depMatch ? fmtDate(depMatch.toISOString().slice(0,10)) : ''}</td>
       </tr>`;
     }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
 
@@ -2839,6 +2858,11 @@ function renderLFDetail() {
       if (mi && (!depMoveInLookup[key] || mi > depMoveInLookup[key].date))
         depMoveInLookup[key] = { date: mi, str: r.move_in };
     });
+    // DEBUG: log SMI keys vs deposit keys so we can spot mismatches
+    console.log('[SMI] keys sample:', Object.keys(depMoveInLookup).slice(0,10));
+    const depKeysSample = src.slice(0,10).map(r => `${r.pod}|${normUnit(r.unit)}`);
+    console.log('[DEP] keys sample:', depKeysSample);
+    console.log('[SMI] total rows:', lfSMIRows.length, '| lookup entries:', Object.keys(depMoveInLookup).length);
     head = `<tr>
       <th onclick="lfDetSort('date')">Posted Date</th>
       <th onclick="lfDetSort('payee')">Payee</th>
