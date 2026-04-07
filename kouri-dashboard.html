@@ -216,6 +216,9 @@ body {
 .card-value.gray   { color: #555; }
 .card-value.money  { font-size: 20px; }
 .card-sub { font-size: 11px; color: #aaa; margin-top: 3px; }
+.card-metric { font-size: 11px; color: #1565c0; margin-top: 4px; font-weight: 600; }
+.card-metric.conv { color: #2e7d32; }
+.card-metric.time { color: #6a1b9a; }
 /* ─── Two-panel layout ─── */
 .panels {
   display: grid;
@@ -2197,6 +2200,36 @@ function parseDate(s) {
   return isNaN(d) ? null : d;
 }
 
+// Parse a duration value into minutes (handles numbers, "H:MM", "H:MM:SS", "Xh Ym")
+function parseDuration(s) {
+  if (s === null || s === undefined || s === '') return null;
+  if (typeof s === 'number') return s; // assume minutes
+  const str = String(s).trim();
+  // "H:MM:SS" or "H:MM"
+  const hms = str.match(/^(\d+):(\d{2})(?::(\d{2}))?$/);
+  if (hms) return +hms[1] * 60 + +hms[2] + (+hms[3] || 0) / 60;
+  // "Xh Ym" or "Xh" or "Ym"
+  const hm = str.match(/(?:(\d+)\s*h(?:r|ours?)?)?\s*(?:(\d+)\s*m(?:in)?)?/i);
+  if (hm && (hm[1] || hm[2])) return (+hm[1] || 0) * 60 + (+hm[2] || 0);
+  // plain number string
+  const n = parseFloat(str);
+  return isNaN(n) ? null : n;
+}
+
+// Format minutes → "Xm" / "Xh Xm"
+function fmtMins(v) {
+  if (v === null || v === undefined) return '—';
+  const h = Math.floor(v / 60), m = Math.round(v % 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+// Format days → "Xd" / "Xh" (if < 1 day)
+function fmtDays(v) {
+  if (v === null || v === undefined) return '—';
+  if (v < 1) return `${Math.round(v * 24)}h`;
+  return `${v.toFixed(1)}d`;
+}
+
 // Filter any raw detail array by current date range chip
 function lfFilterDetail(rows, dateField) {
   const { from, to } = getLFDateBounds(lfDateRange);
@@ -2272,14 +2305,16 @@ async function loadLFApp() {
     date         : r['Application Date']  || '',
     prospect     : r['Applicant Name']    || '',
     property     : r['Property']          || '',
+    unit         : r['Unit']              || '',
     pod          : r['POD']               || '',
     status       : r['Status']            || '',
     screening    : r['Screening Status']  || '',
     reason       : r['Reason for Status'] || '',
     lead_source  : r['Lead Source']       || '',
-    decision_dt  : r['Decision Date']     || '',
-    inq_id       : r['Inquiry ID']        || '',
-    app_id       : r['Application ID']    || '',
+    decision_dt  : r['Decision Date']          || '',
+    inq_id       : r['Inquiry ID']             || '',
+    app_id       : r['Application ID']         || '',
+    group_id     : r['Application Group ID']   || '',
   }));
 }
 
@@ -2360,13 +2395,18 @@ function lfAggByPOD() {
     m.showings_total++;
     if (/complet/i.test(r.status)) m.showings_comp++;
   });
-  // Applications — by application received date
+  // Applications — count unique group IDs per POD (co-applicants in same group = 1)
+  const podAppGroups = {};
   lfFilterDetail(lfAppRows, 'date').forEach(r => {
-    const m = ensure(r.pod || 'Unknown');
-    m.apps++;
+    const pod = r.pod || 'Unknown';
+    ensure(pod);
+    if (!podAppGroups[pod]) podAppGroups[pod] = new Set();
+    podAppGroups[pod].add(r.group_id || `__solo_${r.app_id || r.prospect + r.date}`);
+    const m = map[pod];
     if (/decision pending|in review/i.test(r.status)) m.pending++;
     if (/approv/i.test(r.status)) m.approved++;
   });
+  Object.entries(podAppGroups).forEach(([pod, groups]) => { map[pod].apps = groups.size; });
   // Deposits — GL 1160 posted date
   lfFilterDetail(lfDepRows, 'date').forEach(r => {
     ensure(r.pod || 'Unknown').deposits++;
@@ -2385,44 +2425,120 @@ function renderLF() {
 }
 
 function renderLFCards() {
-  const agg = lfAggByPOD();
-  const tot = agg.reduce((a, b) => ({
-    inquiries: a.inquiries + b.inquiries,
-    showings_comp: a.showings_comp + b.showings_comp,
-    showings_total: a.showings_total + b.showings_total,
-    apps: a.apps + b.apps,
-    pending: a.pending + b.pending,
-    approved: a.approved + b.approved,
-    deposits: a.deposits + b.deposits,
-  }), { inquiries:0, showings_comp:0, showings_total:0, apps:0, pending:0, approved:0, deposits:0 });
+  // Filtered rows — respect both date range AND active POD
+  let gcRows  = lfFilterDetail(lfGCRows,  'date');
+  let shRows  = lfFilterDetail(lfShRows,  'date');
+  let appRows = lfFilterDetail(lfAppRows, 'date');
+  let depRows = lfFilterDetail(lfDepRows, 'date');
+  if (lfPOD) {
+    gcRows  = gcRows.filter(r  => r.pod === lfPOD);
+    shRows  = shRows.filter(r  => r.pod === lfPOD);
+    appRows = appRows.filter(r => r.pod === lfPOD);
+    depRows = depRows.filter(r => r.pod === lfPOD);
+  }
 
-  const convRate = tot.inquiries > 0 ? Math.round(tot.deposits / tot.inquiries * 100) : 0;
+  // ── Counts ───────────────────────────────────────────────────────────
+  const inquiries    = gcRows.length;
+  const shTotal      = shRows.length;
+  const shComp       = shRows.filter(r => /complet/i.test(r.status)).length;
+  const apps         = appRows.length;
+  const appsPending  = appRows.filter(r => /decision pending|in review/i.test(r.status)).length;
+  const appsApproved = appRows.filter(r => /approv/i.test(r.status)).length;
+  const deposits     = depRows.length;
+
+  // ── Inquiries: avg time to first contact ─────────────────────────────
+  const ttcVals = gcRows.map(r => parseDuration(r.time_to_contact)).filter(v => v !== null && v >= 0);
+  const avgTTC  = ttcVals.length ? ttcVals.reduce((a,b)=>a+b,0) / ttcVals.length : null;
+
+  // ── Showings: conv rate + avg GC→Showing days ────────────────────────
+  const shConv = inquiries > 0 ? Math.round(shComp / inquiries * 100) : null;
+  // Match showings to GC by inq_id (search ALL GC rows, not date-filtered)
+  const gcByInqId = {};
+  lfGCRows.forEach(r => { if (r.inq_id) gcByInqId[r.inq_id] = r; });
+  const gcToShTimes = shRows
+    .filter(r => r.inq_id && gcByInqId[r.inq_id])
+    .map(r => {
+      const sd = parseDate(r.date), gd = parseDate(gcByInqId[r.inq_id].date);
+      return (sd && gd) ? (sd - gd) / 864e5 : null;
+    }).filter(v => v !== null && v >= 0);
+  const avgGCtoSh = gcToShTimes.length ? gcToShTimes.reduce((a,b)=>a+b,0) / gcToShTimes.length : null;
+
+  // ── Applications: conv + showing→app + pending→approval ─────────────
+  const appConv = shComp > 0 ? Math.round(apps / shComp * 100) : null;
+  // Earliest completed showing per inquiry (search ALL showings)
+  const compShByInqId = {};
+  lfShRows.filter(r => r.inq_id && /complet/i.test(r.status)).forEach(r => {
+    const d = parseDate(r.date);
+    if (d && (!compShByInqId[r.inq_id] || d < compShByInqId[r.inq_id])) compShByInqId[r.inq_id] = d;
+  });
+  const shToAppTimes = appRows
+    .filter(r => r.inq_id && compShByInqId[r.inq_id])
+    .map(r => {
+      const ad = parseDate(r.date);
+      return (ad && compShByInqId[r.inq_id]) ? (ad - compShByInqId[r.inq_id]) / 864e5 : null;
+    }).filter(v => v !== null && v >= 0);
+  const avgShToApp = shToAppTimes.length ? shToAppTimes.reduce((a,b)=>a+b,0) / shToAppTimes.length : null;
+  // Application received → decision (for approved apps only)
+  const pendToApprTimes = appRows
+    .filter(r => /approv/i.test(r.status) && r.decision_dt)
+    .map(r => {
+      const ad = parseDate(r.date), dd = parseDate(r.decision_dt);
+      return (ad && dd) ? (dd - ad) / 864e5 : null;
+    }).filter(v => v !== null && v >= 0);
+  const avgPendToAppr = pendToApprTimes.length ? pendToApprTimes.reduce((a,b)=>a+b,0) / pendToApprTimes.length : null;
+
+  // ── Deposits: conv + approval→deposit days ───────────────────────────
+  // Unique application groups (each group = one tenancy application, regardless of co-applicants)
+  const appGroups = new Set(appRows.filter(r=>r.group_id).map(r=>r.group_id));
+  const depUnits  = new Set(depRows.filter(r=>r.property&&r.unit).map(r=>`${r.property}|${r.unit}`));
+  const depConv   = appGroups.size > 0 ? Math.round(depUnits.size / appGroups.size * 100) : null;
+  // Latest approved app decision_dt per property+unit (all approved apps, not date-filtered)
+  const approvedByUnit = {};
+  lfAppRows.filter(r => /approv/i.test(r.status) && r.decision_dt && r.property && r.unit).forEach(r => {
+    const key = `${r.property}|${r.unit}`;
+    const d = parseDate(r.decision_dt);
+    if (d && (!approvedByUnit[key] || d > approvedByUnit[key])) approvedByUnit[key] = d;
+  });
+  const apprToDepTimes = depRows
+    .filter(r => r.property && r.unit)
+    .map(r => {
+      const key = `${r.property}|${r.unit}`;
+      const dd = parseDate(r.date), ad = approvedByUnit[key];
+      return (dd && ad) ? (dd - ad) / 864e5 : null;
+    }).filter(v => v !== null && v >= 0);
+  const avgApprToDep = apprToDepTimes.length ? apprToDepTimes.reduce((a,b)=>a+b,0) / apprToDepTimes.length : null;
+
+  // ── Render ───────────────────────────────────────────────────────────
+  const m = (label, val, cls='') => val !== null ? `<div class="card-metric ${cls}">${label}: <strong>${val}</strong></div>` : '';
 
   $('lf-cards').innerHTML = `
-    <div class="card blue">
+    <div class="card blue" onclick="setLFView('gc')" style="cursor:pointer">
       <div class="card-label">Inquiries</div>
-      <div class="card-value blue">${tot.inquiries}</div>
+      <div class="card-value blue">${inquiries}</div>
       <div class="card-sub">guest cards received</div>
+      ${m('Avg contact time', avgTTC !== null ? fmtMins(avgTTC) : null, 'time')}
     </div>
-    <div class="card">
+    <div class="card" onclick="setLFView('sh')" style="cursor:pointer">
       <div class="card-label">Showings</div>
-      <div class="card-value">${tot.showings_comp}<span style="font-size:14px;color:#aaa"> / ${tot.showings_total}</span></div>
+      <div class="card-value">${shComp}<span style="font-size:14px;color:#aaa"> / ${shTotal}</span></div>
       <div class="card-sub">completed / scheduled</div>
+      ${m('Conv from inquiries', shConv !== null ? shConv + '%' : null, 'conv')}
+      ${m('Avg inquiry→showing', avgGCtoSh !== null ? fmtDays(avgGCtoSh) : null, 'time')}
     </div>
-    <div class="card amber">
+    <div class="card amber" onclick="setLFView('app')" style="cursor:pointer">
       <div class="card-label">Applications</div>
-      <div class="card-value amber">${tot.apps}</div>
-      <div class="card-sub">${tot.pending} pending · ${tot.approved} approved</div>
+      <div class="card-value amber">${apps}</div>
+      <div class="card-sub">${appsPending} pending · ${appsApproved} approved</div>
+      ${m('Conv from showings', appConv !== null ? appConv + '%' : null, 'conv')}
+      ${m('Avg showing→app', avgShToApp !== null ? fmtDays(avgShToApp) : null, 'time')}
+      ${m('Avg app→approval', avgPendToAppr !== null ? fmtDays(avgPendToAppr) : null, 'time')}
     </div>
-    <div class="card" style="border-top-color:#2e7d32">
+    <div class="card" style="border-top-color:#2e7d32;cursor:pointer" onclick="setLFView('dep')">
       <div class="card-label">Deposits</div>
-      <div class="card-value green">${tot.deposits}</div>
+      <div class="card-value green">${deposits}</div>
       <div class="card-sub">security deposits collected</div>
-    </div>
-    <div class="card gray">
-      <div class="card-label">Conversion</div>
-      <div class="card-value gray">${convRate}%</div>
-      <div class="card-sub">inquiry → deposit</div>
+      ${m('Conv from applications', depConv !== null ? depConv + '%' : null, 'conv')}
+      ${m('Avg approval→deposit', avgApprToDep !== null ? fmtDays(avgApprToDep) : null, 'time')}
     </div>
   `;
 }
@@ -2466,6 +2582,7 @@ function renderLFPods() {
 function selectLFPOD(pod) {
   lfPOD = (lfPOD === pod) ? null : pod;
   $('lf-clear').style.display = lfPOD ? '' : 'none';
+  renderLFCards();
   renderLFPods();
   renderLFDetail();
 }
@@ -2539,7 +2656,29 @@ function renderLFDetail() {
   } else if (lfView === 'app') {
     src = lfFilterDetail(lfAppRows, 'date');
     if (lfPOD) src = src.filter(r => r.pod === lfPOD);
-    src.sort(colSort);
+
+    // Identify group_ids with more than one member in current view
+    const grpCounts = {};
+    src.forEach(r => { if (r.group_id) grpCounts[r.group_id] = (grpCounts[r.group_id]||0)+1; });
+    const multiGroups = new Set(Object.keys(grpCounts).filter(g => grpCounts[g] > 1));
+
+    // Sort: cluster co-applicants together, user's sort column respected within and between groups
+    const grpRep = {}; // best (min) sort value per group — used to order groups among other rows
+    src.forEach(r => {
+      if (r.group_id && multiGroups.has(r.group_id)) {
+        const v = String(r[lfDetSrt.col] || '');
+        if (!grpRep[r.group_id] || v < grpRep[r.group_id]) grpRep[r.group_id] = v;
+      }
+    });
+    src.sort((a, b) => {
+      const ag = (a.group_id && multiGroups.has(a.group_id)) ? a.group_id : null;
+      const bg = (b.group_id && multiGroups.has(b.group_id)) ? b.group_id : null;
+      if (ag && ag === bg) return colSort(a, b); // same group → user sort
+      const av = ag ? (grpRep[ag] || '') : String(a[lfDetSrt.col] || '');
+      const bv = bg ? (grpRep[bg] || '') : String(b[lfDetSrt.col] || '');
+      return av.localeCompare(bv) * lfDetSrt.dir;
+    });
+
     colspan = 7;
     head = `<tr>
       <th onclick="lfDetSort('date')">App Date</th>
@@ -2547,8 +2686,8 @@ function renderLFDetail() {
       <th onclick="lfDetSort('property')">Property</th>
       <th onclick="lfDetSort('lead_source')">Lead Source</th>
       <th onclick="lfDetSort('status')">Status</th>
-      <th onclick="lfDetSort('screening')">Screening</th>
       <th onclick="lfDetSort('reason')">Reason</th>
+      <th onclick="lfDetSort('screening')">Screening</th>
     </tr>`;
     const empty = lfAppRows.length === 0 && GIDS.lfApplications !== '000000000' ? 'Loading…' : 'No applications for this period';
     body = src.map(r => {
@@ -2556,14 +2695,17 @@ function renderLFDetail() {
       const scr = r.screening || '—';
       const stColor  = /approv/i.test(st)  ? '#2e7d32' : /denied|reject/i.test(st)  ? '#c62828' : /pending/i.test(st)  ? '#e65100' : '#555';
       const scrColor = /complet/i.test(scr) ? '#2e7d32' : /fail|adverse/i.test(scr) ? '#c62828' : /screen/i.test(scr) ? '#1565c0' : '#555';
-      return `<tr>
+      const isGrouped = r.group_id && multiGroups.has(r.group_id);
+      const rowStyle  = isGrouped ? 'background:#f5f0ff;border-left:3px solid #7c4dff' : '';
+      const badge     = isGrouped ? '<span style="font-size:10px;background:#7c4dff;color:#fff;border-radius:3px;padding:1px 5px;margin-left:6px;vertical-align:middle;font-weight:600">co-app</span>' : '';
+      return `<tr style="${rowStyle}">
         <td>${fmtDate(r.date)}</td>
-        <td>${r.prospect || '—'}</td>
+        <td>${r.prospect || '—'}${badge}</td>
         <td>${r.property || '—'}</td>
         <td>${r.lead_source || '—'}</td>
         <td style="color:${stColor};font-weight:600">${st}</td>
-        <td style="color:${scrColor};font-weight:600">${scr}</td>
         <td style="color:#666;font-size:12px">${r.reason || '—'}</td>
+        <td style="color:${scrColor};font-weight:600">${scr}</td>
       </tr>`;
     }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
 
@@ -2636,12 +2778,15 @@ function renderLFDetail() {
       // Walk through steps, capping at 90% until real response arrives
       let elapsed = 0;
       SYNC_STEPS.forEach((step, i) => {
+        // Capture loop values NOW — closures see the final value of `elapsed` otherwise
+        const delay    = elapsed * 1000;
+        const progress = Math.min(((elapsed + step.dur) / TOTAL_DUR) * 90, 90);
+        const label_text = step.label;
         const t = setTimeout(() => {
-          const progress = Math.min(((elapsed + step.dur) / TOTAL_DUR) * 90, 90);
           bar.style.width = progress.toFixed(1) + '%';
-          label.textContent = step.label;
+          label.textContent = label_text;
           pct.textContent = Math.round(progress) + '%';
-        }, elapsed * 1000);
+        }, delay);
         syncTimers.push(t);
         elapsed += step.dur;
       });
