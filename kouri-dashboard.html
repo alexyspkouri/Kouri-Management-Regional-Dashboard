@@ -805,7 +805,7 @@ tbody td { padding: 9px 14px; color: #333; }
   </div>
   <div id="lf-content" style="display:none">
     <!-- Date range selector -->
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
+    <div id="lf-date-range-row" style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
       <span style="font-size:12px;font-weight:600;color:#666;letter-spacing:.5px;text-transform:uppercase">Date Range</span>
       <div class="chips">
         <div class="chip on" id="lf-dr-cw"  onclick="setLFDateRange('cw')">Current Week</div>
@@ -828,17 +828,7 @@ tbody td { padding: 9px 14px; color: #333; }
         </div>
         <div class="pod-tbl-wrap">
           <table>
-            <thead>
-              <tr>
-                <th onclick="lfPodSort('pod')">POD</th>
-                <th onclick="lfPodSort('inquiries')" title="Total guest cards received">Inquiries</th>
-                <th onclick="lfPodSort('showings_comp')" title="Showings completed / total scheduled">Showings</th>
-                <th onclick="lfPodSort('apps')" title="Rental applications submitted">Apps</th>
-                <th onclick="lfPodSort('pending')" title="Applications in Pending status">Pending</th>
-                <th onclick="lfPodSort('approved')" title="Applications approved">Approved</th>
-                <th onclick="lfPodSort('deposits')" title="Deposits collected">Deposits</th>
-              </tr>
-            </thead>
+            <thead id="lf-pod-head"></thead>
             <tbody id="lf-pod-body"></tbody>
           </table>
         </div>
@@ -852,10 +842,16 @@ tbody td { padding: 9px 14px; color: #333; }
         <div class="panel-header" style="align-items:center;gap:10px">
           <span class="panel-title" id="lf-right-title">Guest Cards</span>
           <div class="chips" style="margin-left:auto">
-            <div class="chip on" id="lf-v-gc"   onclick="setLFView('gc')">🗂 Guest Cards</div>
-            <div class="chip"    id="lf-v-sh"   onclick="setLFView('sh')">👁 Showings</div>
-            <div class="chip"    id="lf-v-app"  onclick="setLFView('app')">📋 Applications</div>
-            <div class="chip"    id="lf-v-dep"  onclick="setLFView('dep')">💰 Deposits</div>
+            <div class="chip on" id="lf-v-gc"  onclick="setLFView('gc')">🗂 Guest Cards</div>
+            <div class="chip"   id="lf-v-sh"  onclick="setLFView('sh')">👁 Showings</div>
+            <div class="chip"   id="lf-v-app" onclick="setLFView('app')">📋 Applications</div>
+            <div class="chip"   id="lf-v-dep" onclick="setLFView('dep')">💰 Deposits</div>
+            <div class="chip"   id="lf-v-vac" onclick="setLFView('vac')">🏠 Vacancy</div>
+          </div>
+          <!-- Vacancy sub-view chips — only visible when lfView === 'vac' -->
+          <div id="lf-vac-subchips" style="display:none;margin-left:12px" class="chips">
+            <div class="chip on" id="lf-vs-prop"  onclick="setVacView('prop')">🏢 Property Summary</div>
+            <div class="chip"   id="lf-vs-vdet"  onclick="setVacView('vdet')">🔍 Vacant Detail</div>
           </div>
         </div>
         <div class="tbl-wrap" id="lf-detail-wrap">
@@ -886,6 +882,7 @@ const GIDS = {
   lfApplications:   '935824813',
   lfDeposits:       '820311706',
   lfSchedMoveIns:   '1550438509',
+  lfVacancy:        '000000000',  // set after first sync creates the tab
 };
 // ─── JSONP DATA FETCH (works from file:// — no CORS needed) ──────────
 let _cbSeq = 0;
@@ -2162,8 +2159,62 @@ let lfShRows  = [];   // showings — 90-day raw records
 let lfAppRows = [];   // rental applications — 90-day raw records
 let lfDepRows = [];   // security deposits GL 1160 — 90-day raw records
 let lfSMIRows = [];   // scheduled move-ins from tickler
+let lfVacRows = [];   // unit vacancy detail
 let lfLoaded = false;
-let lfPOD = null, lfDateRange = 'cw', lfView = 'gc';
+let lfPOD = null, lfDateRange = 'cw', lfView = 'gc', lfVacView = 'prop';
+
+// ── Vacancy aggregation helpers ────────────────────────────────────────
+function vacAgg(rows) {
+  // rows = lfVacRows, optionally pre-filtered by POD
+  // Returns array of { key, total, vacant, notice, gt45, futureIns }
+  const map = {};
+  const today = new Date(); today.setHours(0,0,0,0);
+  rows.forEach(r => {
+    const k = r.pod || 'Unknown';
+    if (!map[k]) map[k] = { key: k, total: 0, vacant: 0, notice: 0, gt45: 0, futureIns: 0 };
+    const m = map[k];
+    m.total++;
+    if (/vacant/i.test(r.unit_status))  m.vacant++;
+    if (/notice/i.test(r.unit_status))  m.notice++;
+    const dv = parseInt(r.days_vacant);
+    if (!isNaN(dv) && dv > 45)          m.gt45++;
+  });
+  // Future move-ins from SMI tickler, grouped by POD
+  lfSMIRows.filter(r => r.pod && r.move_in).forEach(r => {
+    const mi = parseDate(r.move_in);
+    if (!mi || mi < today) return;
+    const k = r.pod;
+    if (!map[k]) map[k] = { key: k, total: 0, vacant: 0, notice: 0, gt45: 0, futureIns: 0 };
+    map[k].futureIns++;
+  });
+  return Object.values(map);
+}
+
+function vacAggByProperty(rows) {
+  // Same as vacAgg but keyed by property name; only returns properties with > 4 total units
+  const map = {};
+  const today = new Date(); today.setHours(0,0,0,0);
+  rows.forEach(r => {
+    const k = r.property || 'Unknown';
+    if (!map[k]) map[k] = { key: k, pod: r.pod || '', total: 0, vacant: 0, notice: 0, gt45: 0, futureIns: 0 };
+    const m = map[k];
+    m.total++;
+    if (/vacant/i.test(r.unit_status))  m.vacant++;
+    if (/notice/i.test(r.unit_status))  m.notice++;
+    const dv = parseInt(r.days_vacant);
+    if (!isNaN(dv) && dv > 45)          m.gt45++;
+  });
+  // Future move-ins from SMI, keyed by property name
+  lfSMIRows.filter(r => r.property && r.move_in).forEach(r => {
+    const mi = parseDate(r.move_in);
+    if (!mi) return;
+    if (mi < today) return;
+    const k = r.property;
+    if (!map[k]) return; // only properties already in vacancy data
+    map[k].futureIns++;
+  });
+  return Object.values(map).filter(p => p.total > 4);
+}
 let lfPodSrt = { col: 'inquiries', dir: -1 };
 let lfDetSrt = { col: 'date', dir: -1 };
 
@@ -2263,7 +2314,7 @@ function lfFilterDetail(rows, dateField) {
 async function loadLF() {
   if (lfLoaded) return;
   try {
-    await Promise.all([loadLFGC(), loadLFSh(), loadLFApp(), loadLFDep(), loadLFSMI()]);
+    await Promise.all([loadLFGC(), loadLFSh(), loadLFApp(), loadLFDep(), loadLFSMI(), loadLFVacancy()]);
     lfLoaded = true;
     $('lf-loading').style.display = 'none';
     $('lf-content').style.display = '';
@@ -2402,6 +2453,32 @@ async function loadLFSMI() {
 }
 
 
+async function loadLFVacancy() {
+  if (GIDS.lfVacancy === '000000000') return;
+  const raw = await fetchGViz(GIDS.lfVacancy);
+  lfVacRows = raw.map(r => ({
+    property     : r['Property']           || '',
+    pod          : r['POD']                || '',
+    unit         : r['Unit']               || '',
+    unit_status  : r['Unit Status']        || '',
+    beds         : r['Beds']               || '',
+    baths        : r['Baths']              || '',
+    sqft         : r['Sqft']               || '',
+    market_rent  : r['Market Rent']        || '',
+    available    : r['Available Date']     || '',
+    days_vacant  : r['Days Vacant']        || '',
+    last_move_out: r['Last Move Out']      || '',
+    internet     : r['Posted to Internet'] || '',
+    website      : r['Posted to Website']  || '',
+    inspection   : r['Inspection']         || '',
+    maintenance  : r['Maintenance']        || '',
+    paint        : r['Paint']              || '',
+    flooring     : r['Flooring']           || '',
+    cleaning     : r['Cleaning']           || '',
+  }));
+  console.log('[LF VAC] Rows loaded:', lfVacRows.length);
+}
+
 // ── State setters ─────────────────────────────────────────────────────
 function setLFDateRange(key) {
   lfDateRange = key;
@@ -2411,9 +2488,21 @@ function setLFDateRange(key) {
 
 function setLFView(v) {
   lfView = v;
-  ['gc','sh','app','dep'].forEach(k => $('lf-v-' + k).classList.toggle('on', k === v));
-  const titles = { gc:'Guest Cards', sh:'Showings', app:'Applications', dep:'Deposits' };
+  ['gc','sh','app','dep','vac'].forEach(k => $('lf-v-' + k).classList.toggle('on', k === v));
+  const titles = { gc:'Guest Cards', sh:'Showings', app:'Applications', dep:'Deposits', vac:'Vacancy' };
   $('lf-right-title').textContent = titles[v];
+  // Vacancy: hide date range row + summary cards, show sub-chips; reverse for other views
+  const isVac = v === 'vac';
+  $('lf-date-range-row').style.display  = isVac ? 'none' : '';
+  $('lf-cards').style.display           = isVac ? 'none' : '';
+  $('lf-vac-subchips').style.display    = isVac ? '' : 'none';
+  renderLFPods();
+  renderLFDetail();
+}
+
+function setVacView(sv) {
+  lfVacView = sv;
+  ['prop','vdet'].forEach(k => $('lf-vs-' + k).classList.toggle('on', k === sv));
   renderLFDetail();
 }
 
@@ -2676,6 +2765,46 @@ function renderLFCards() {
 }
 
 function renderLFPods() {
+  const numCell = (val, color, bg) => {
+    const display = (val || val === 0) ? val : '—';
+    const hasVal  = val > 0;
+    const style   = [
+      'text-align:center', 'font-size:15px', 'font-weight:700',
+      hasVal && color ? `color:${color}` : 'color:#bbb',
+      hasVal && bg    ? `background:${bg};border-radius:6px` : '',
+    ].filter(Boolean).join(';');
+    return `<td style="${style}">${display}</td>`;
+  };
+
+  if (lfView === 'vac') {
+    // Vacancy POD summary table
+    let src = lfPOD ? lfVacRows.filter(r => r.pod === lfPOD) : lfVacRows;
+    const agg = vacAgg(src);
+    agg.sort((a, b) => a.key.localeCompare(b.key));
+    $('lf-pod-pill').textContent = agg.length + ' POD' + (agg.length !== 1 ? 's' : '');
+    $('lf-pod-head').innerHTML = `<tr>
+      <th onclick="">POD</th>
+      <th style="text-align:center" title="All units in this POD">Total</th>
+      <th style="text-align:center" title="Currently vacant">Vacant</th>
+      <th style="text-align:center" title="Tenants on notice to vacate">Ftr Move Outs</th>
+      <th style="text-align:center" title="Scheduled move-ins (tickler)">Ftr Move Ins</th>
+      <th style="text-align:center" title="Vacant units with 45+ days vacant">&gt;45 Days</th>
+    </tr>`;
+    $('lf-pod-body').innerHTML = agg.map(p => {
+      const isActive = lfPOD === p.key;
+      return `<tr class="${isActive ? 'active-row' : ''}" onclick="selectLFPOD('${p.key.replace(/'/g,"\\'")}')">
+        <td style="font-size:13px;font-weight:600;white-space:nowrap">${p.key}</td>
+        ${numCell(p.total,     '#555',    null)}
+        ${numCell(p.vacant,    '#c62828', '#ffebee')}
+        ${numCell(p.notice,    '#e65100', '#fff3e0')}
+        ${numCell(p.futureIns, '#2e7d32', '#e8f5e9')}
+        ${numCell(p.gt45,      '#b71c1c', '#ffcdd2')}
+      </tr>`;
+    }).join('');
+    return;
+  }
+
+  // Default leasing funnel POD table
   let pods = lfAggByPOD();
   const { col, dir } = lfPodSrt;
   pods.sort((a, b) => {
@@ -2684,18 +2813,15 @@ function renderLFPods() {
     return typeof av === 'string' ? av.localeCompare(bv) * dir : (av - bv) * dir;
   });
   $('lf-pod-pill').textContent = pods.length + ' POD' + (pods.length !== 1 ? 's' : '');
-  const numCell = (val, color, bg) => {
-    const display = (val || val === 0) ? val : '—';
-    const hasVal  = val > 0;
-    const style   = [
-      'text-align:center',
-      'font-size:15px',
-      'font-weight:700',
-      hasVal && color ? `color:${color}` : 'color:#bbb',
-      hasVal && bg    ? `background:${bg};border-radius:6px` : '',
-    ].filter(Boolean).join(';');
-    return `<td style="${style}">${display}</td>`;
-  };
+  $('lf-pod-head').innerHTML = `<tr>
+    <th onclick="lfPodSort('pod')">POD</th>
+    <th onclick="lfPodSort('inquiries')" title="Total guest cards received">Inquiries</th>
+    <th onclick="lfPodSort('showings_comp')" title="Showings completed / total scheduled">Showings</th>
+    <th onclick="lfPodSort('apps')" title="Rental applications submitted">Apps</th>
+    <th onclick="lfPodSort('pending')" title="Applications in Pending status">Pending</th>
+    <th onclick="lfPodSort('approved')" title="Applications approved">Approved</th>
+    <th onclick="lfPodSort('deposits')" title="Deposits collected">Deposits</th>
+  </tr>`;
   $('lf-pod-body').innerHTML = pods.map(p => {
     const isActive = lfPOD === p.pod;
     const showingStr = p.showings_total > 0 ? `${p.showings_comp}/${p.showings_total}` : null;
@@ -2983,11 +3109,106 @@ function renderLFDetail() {
         <td style="text-align:right;color:#1565c0;font-weight:600">${fmtAmt(r.amount)}</td>
       </tr>`;
     }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
+
+  } else if (lfView === 'vac') {
+    let vacSrc = [...lfVacRows];
+    if (lfPOD) vacSrc = vacSrc.filter(r => r.pod === lfPOD);
+
+    // ── Badge helpers shared by both sub-views ──────────────────────────
+    const badgeI = v => /yes|true|1/i.test(String(v||''))
+      ? `<span style="display:inline-block;background:#1565c0;color:#fff;font-size:9px;font-weight:700;border-radius:3px;padding:1px 4px;margin-left:3px;vertical-align:middle">I</span>` : '';
+    const badgeW = v => /yes|true|1/i.test(String(v||''))
+      ? `<span style="display:inline-block;background:#2e7d32;color:#fff;font-size:9px;font-weight:700;border-radius:3px;padding:1px 4px;margin-left:3px;vertical-align:middle">W</span>` : '';
+    const statusColor = s => /vacant/i.test(s) ? '#c62828' : /notice/i.test(s) ? '#e65100' : '#555';
+    const dvColor = dv => { const n = parseInt(dv); return n > 45 ? '#b71c1c' : n > 30 ? '#c62828' : n > 14 ? '#e65100' : '#555'; };
+    const mkCell = v => {
+      // Make-ready status cell: color-code common AppFolio values
+      if (!v || v === '—' || v === '') return `<td style="text-align:center;color:#bbb">—</td>`;
+      const s = String(v);
+      const col = /complete|done|yes/i.test(s) ? '#2e7d32' : /in.progress|started/i.test(s) ? '#e65100' : /needed|required|no/i.test(s) ? '#c62828' : '#555';
+      return `<td style="text-align:center;font-size:11px;color:${col};font-weight:600">${s}</td>`;
+    };
+
+    if (lfVacView === 'prop') {
+      // ── Property Summary ───────────────────────────────────────────────
+      const propAgg = vacAggByProperty(vacSrc);
+      propAgg.sort((a, b) => (b.vacant - a.vacant) || a.key.localeCompare(b.key));
+      colspan = 7;
+      head = `<tr>
+        <th onclick="lfDetSort('property')">Property</th>
+        <th onclick="lfDetSort('pod')" style="text-align:center">POD</th>
+        <th style="text-align:center" title="All units">Total</th>
+        <th style="text-align:center" title="Currently vacant">Vacant</th>
+        <th style="text-align:center" title="On notice to vacate">Ftr Move Outs</th>
+        <th style="text-align:center" title="Scheduled move-ins">Ftr Move Ins</th>
+        <th style="text-align:center" title="Vacant >45 days">&gt;45 Days</th>
+      </tr>`;
+      const numCell2 = (val, color, bg) => {
+        const hasVal = val > 0;
+        return `<td style="text-align:center;font-size:14px;font-weight:700;${hasVal&&color?`color:${color}`:'color:#bbb'}${hasVal&&bg?`;background:${bg};border-radius:5px`:''}">${val||'—'}</td>`;
+      };
+      const empty = lfVacRows.length === 0 && GIDS.lfVacancy !== '000000000' ? 'Loading…' : 'No properties with >4 units';
+      body = propAgg.map(p => `<tr>
+        <td style="font-weight:600">${p.key}</td>
+        <td style="text-align:center;font-size:12px;color:#555">${p.pod||'—'}</td>
+        ${numCell2(p.total,     '#555',    null)}
+        ${numCell2(p.vacant,    '#c62828', '#ffebee')}
+        ${numCell2(p.notice,    '#e65100', '#fff3e0')}
+        ${numCell2(p.futureIns, '#2e7d32', '#e8f5e9')}
+        ${numCell2(p.gt45,      '#b71c1c', '#ffcdd2')}
+      </tr>`).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
+
+    } else {
+      // ── Vacant Detail ──────────────────────────────────────────────────
+      // Only show units that are actually vacant (not notice, not occupied)
+      const vacOnly = vacSrc.filter(r => /vacant/i.test(r.unit_status));
+      vacOnly.sort((a, b) => (parseInt(b.days_vacant)||0) - (parseInt(a.days_vacant)||0));
+      colspan = 11;
+      head = `<tr>
+        <th onclick="lfDetSort('property')">Property</th>
+        <th onclick="lfDetSort('unit')">Unit</th>
+        <th style="text-align:center">Bed/Bath</th>
+        <th style="text-align:center" onclick="lfDetSort('days_vacant')">Days Vacant</th>
+        <th onclick="lfDetSort('available')">Move In Date</th>
+        <th style="text-align:center">Inspection</th>
+        <th style="text-align:center">Maintenance</th>
+        <th style="text-align:center">Paint</th>
+        <th style="text-align:center">Flooring</th>
+        <th style="text-align:center">Cleaning</th>
+      </tr>`;
+      // Build move-in lookup from SMI by property+normUnit for vacant units
+      const vacMiLookup = {};
+      lfSMIRows.filter(r => r.property && r.unit && r.move_in).forEach(r => {
+        const key = `${r.property}|${normUnit(r.unit)}`;
+        const mi = parseDate(r.move_in);
+        if (mi && (!vacMiLookup[key] || mi > vacMiLookup[key].date))
+          vacMiLookup[key] = { date: mi, str: r.move_in };
+      });
+      const empty = lfVacRows.length === 0 && GIDS.lfVacancy !== '000000000' ? 'Loading…' : 'No vacant units';
+      body = vacOnly.map(r => {
+        const miEntry = vacMiLookup[`${r.property}|${normUnit(r.unit)}`];
+        const miStr   = miEntry ? fmtDate(miEntry.str) : '—';
+        const bedBath = (r.beds || r.baths) ? `${r.beds||'?'}bd/${r.baths||'?'}ba` : '—';
+        return `<tr>
+          <td>${r.property||'—'}${badgeI(r.internet)}${badgeW(r.website)}</td>
+          <td style="font-size:12px;color:#555">${r.unit||'—'}</td>
+          <td style="text-align:center;font-size:12px">${bedBath}</td>
+          <td style="text-align:center;font-weight:700;color:${dvColor(r.days_vacant)}">${r.days_vacant||'—'}</td>
+          <td style="font-size:12px;color:#2e7d32;font-weight:600">${miStr}</td>
+          ${mkCell(r.inspection)}
+          ${mkCell(r.maintenance)}
+          ${mkCell(r.paint)}
+          ${mkCell(r.flooring)}
+          ${mkCell(r.cleaning)}
+        </tr>`;
+      }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
+    }
   }
 
   $('lf-detail-head').innerHTML = head;
   $('lf-detail-body').innerHTML = body;
-  $('lf-detail-footer').textContent = src.length + ' record' + (src.length!==1?'s':'') + (lfPOD ? ' · ' + lfPOD : '');
+  const recLabel = lfView === 'vac' ? 'unit' : 'record';
+  $('lf-detail-footer').textContent = src.length + ' ' + recLabel + (src.length!==1?'s':'') + (lfPOD ? ' · ' + lfPOD : '');
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────
