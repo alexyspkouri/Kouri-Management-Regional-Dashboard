@@ -813,6 +813,7 @@ tbody td { padding: 9px 14px; color: #333; }
         <div class="chip"    id="lf-dr-lw"  onclick="setLFDateRange('lw')">Last Week</div>
         <div class="chip"    id="lf-dr-mtd" onclick="setLFDateRange('mtd')">Month to Date</div>
         <div class="chip"    id="lf-dr-lm"  onclick="setLFDateRange('lm')">Last Month</div>
+        <div class="chip"    id="lf-dr-pm"  onclick="setLFDateRange('pm')">Prior Month</div>
       </div>
       <span id="lf-range-label" style="font-size:11px;color:#aaa;margin-left:4px"></span>
     </div>
@@ -885,6 +886,7 @@ const GIDS = {
   lfShowings:       '413531120',
   lfApplications:   '935824813',
   lfDeposits:       '820311706',
+  lfSchedMoveIns:   '000000000',
 };
 // ─── JSONP DATA FETCH (works from file:// — no CORS needed) ──────────
 let _cbSeq = 0;
@@ -2160,6 +2162,7 @@ let lfGCRows  = [];   // guest card inquiries — 90-day raw records
 let lfShRows  = [];   // showings — 90-day raw records
 let lfAppRows = [];   // rental applications — 90-day raw records
 let lfDepRows = [];   // security deposits GL 1160 — 90-day raw records
+let lfSMIRows = [];   // scheduled move-ins from tickler
 let lfLoaded = false;
 let lfPOD = null, lfDateRange = 'cw', lfView = 'gc';
 let lfPodSrt = { col: 'inquiries', dir: -1 };
@@ -2182,6 +2185,11 @@ function getLFDateBounds(key) {
     const lmStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
     const lmEnd   = new Date(today.getFullYear(), today.getMonth(), 0); lmEnd.setHours(23,59,59,999);
     return { from: lmStart, to: lmEnd };
+  }
+  if (key === 'pm') {
+    const pmStart = new Date(today.getFullYear(), today.getMonth() - 2, 1);
+    const pmEnd   = new Date(today.getFullYear(), today.getMonth() - 1, 0); pmEnd.setHours(23,59,59,999);
+    return { from: pmStart, to: pmEnd };
   }
   return { from: new Date(today.getFullYear(), today.getMonth(), 1), to: today };
 }
@@ -2245,7 +2253,7 @@ function lfFilterDetail(rows, dateField) {
 async function loadLF() {
   if (lfLoaded) return;
   try {
-    await Promise.all([loadLFGC(), loadLFSh(), loadLFApp(), loadLFDep()]);
+    await Promise.all([loadLFGC(), loadLFSh(), loadLFApp(), loadLFDep(), loadLFSMI()]);
     lfLoaded = true;
     $('lf-loading').style.display = 'none';
     $('lf-content').style.display = '';
@@ -2313,6 +2321,7 @@ async function loadLFApp() {
     reason       : r['Reason for Status'] || '',
     lead_source  : r['Lead Source']       || '',
     decision_dt  : r['Decision Date']          || '',
+    move_in      : r['Move In Date']           || '',
     inq_id       : r['Inquiry ID']             || '',
     app_id       : r['Application ID']         || '',
     group_id     : r['Application Group ID']   || '',
@@ -2348,10 +2357,25 @@ async function loadLFDep() {
   }
 }
 
+async function loadLFSMI() {
+  if (GIDS.lfSchedMoveIns === '000000000') return;
+  const raw = await fetchGViz(GIDS.lfSchedMoveIns);
+  lfSMIRows = raw.map(r => ({
+    property  : r['Property']      || '',
+    pod       : r['POD']           || '',
+    unit      : r['Unit']          || '',
+    tenant    : r['Tenant']        || '',
+    move_in   : r['Move In Date']  || '',
+    move_out  : r['Move Out Date'] || '',
+    status    : r['Status']        || '',
+  }));
+}
+
+
 // ── State setters ─────────────────────────────────────────────────────
 function setLFDateRange(key) {
   lfDateRange = key;
-  ['cw','lw','mtd','lm'].forEach(k => $('lf-dr-' + k).classList.toggle('on', k === key));
+  ['cw','lw','mtd','lm','pm'].forEach(k => $('lf-dr-' + k).classList.toggle('on', k === key));
   renderLF();
 }
 
@@ -2463,6 +2487,11 @@ function renderLFCards() {
   const srcCounts = {};
   gcRows.forEach(r => { if (r.source) srcCounts[r.source] = (srcCounts[r.source] || 0) + 1; });
   const topSource = Object.keys(srcCounts).sort((a,b) => srcCounts[b] - srcCounts[a])[0] || null;
+  const shSrcCounts = {};
+  shRows.filter(r => /complet/i.test(r.status) && r.source).forEach(r => {
+    shSrcCounts[r.source] = (shSrcCounts[r.source] || 0) + 1;
+  });
+  const topShSource = Object.keys(shSrcCounts).sort((a,b) => shSrcCounts[b] - shSrcCounts[a])[0] || null;
 
   // ── Showings: conv rate + avg GC→Showing days ────────────────────────
   const shConv = inquiries > 0 ? Math.round(shComp / inquiries * 100) : null;
@@ -2524,21 +2553,38 @@ function renderLFCards() {
   });
   const depConv = appGroups.size > 0 ? Math.round(convertedGroups.length / appGroups.size * 100) : null;
 
-  // Avg approval→deposit: search all deposit records (not date-filtered) so timing isn't cut off
-  const approvedByUnit = {};
-  lfAppRows.filter(r => /approv/i.test(r.status) && r.decision_dt && r.property && r.unit).forEach(r => {
-    const key = `${r.property}|${r.unit}`;
-    const d = parseDate(r.decision_dt);
-    if (d && (!approvedByUnit[key] || d > approvedByUnit[key])) approvedByUnit[key] = d;
-  });
-  const apprToDepTimes = lfDepRows
-    .filter(r => r.property && r.unit)
+  // Avg approval→deposit: anchored on approved apps in current filter window
+  // For each, find the earliest deposit on that unit on or after the approval date
+  const apprToDepTimes = appRows
+    .filter(r => /approv/i.test(r.status) && r.decision_dt && r.property && r.unit)
     .map(r => {
-      const key = `${r.property}|${r.unit}`;
-      const dd = parseDate(r.date), ad = approvedByUnit[key];
-      return (dd && ad) ? (dd - ad) / 864e5 : null;
+      const ad = parseDate(r.decision_dt);
+      if (!ad) return null;
+      const earliest = lfDepRows
+        .filter(d => d.property === r.property && d.unit === r.unit)
+        .map(d => parseDate(d.date))
+        .filter(d => d && d >= ad)
+        .sort((a, b) => a - b)[0];
+      return earliest ? (earliest - ad) / 864e5 : null;
     }).filter(v => v !== null && v >= 0);
   const avgApprToDep = apprToDepTimes.length ? apprToDepTimes.reduce((a,b)=>a+b,0) / apprToDepTimes.length : null;
+
+  // Avg deposit→move-in: tickler-based lookup by property+unit
+  // Keep the most future move-in per unit so deposits taken before move-in get matched
+  const smiByUnit = {};
+  lfSMIRows.filter(r => r.property && r.unit && r.move_in).forEach(r => {
+    const key = `${r.property}|${r.unit}`;
+    const mi = parseDate(r.move_in);
+    if (mi && (!smiByUnit[key] || mi > smiByUnit[key])) smiByUnit[key] = mi;
+  });
+  const depToMoveInTimes = depRows
+    .filter(r => r.property && r.unit)
+    .map(r => {
+      const dd = parseDate(r.date);
+      const mi = smiByUnit[`${r.property}|${r.unit}`];
+      return (dd && mi && mi >= dd) ? (mi - dd) / 864e5 : null;
+    }).filter(v => v !== null);
+  const avgDepToMoveIn = depToMoveInTimes.length ? depToMoveInTimes.reduce((a,b)=>a+b,0) / depToMoveInTimes.length : null;
 
   // ── Render ───────────────────────────────────────────────────────────
   const m = (label, val, cls='') => val !== null ? `<div class="card-metric ${cls}">${label}: <strong>${val}</strong></div>` : '';
@@ -2558,6 +2604,7 @@ function renderLFCards() {
       <div class="card-sub">completed / scheduled</div>
       ${m('Conv from inquiries', shConv !== null ? shConv + '%' : null, 'conv')}
       ${m('Avg inquiry→showing', avgGCtoSh !== null ? fmtDays(avgGCtoSh) : null, 'time')}
+      ${m('Top source', topShSource, 'conv')}
     </div>
     <div class="card amber" onclick="setLFView('app')" style="cursor:pointer">
       <div class="card-label">Applications</div>
@@ -2573,6 +2620,7 @@ function renderLFCards() {
       <div class="card-sub">security deposits collected</div>
       ${m('Conv from applications', depConv !== null ? depConv + '%' : null, 'conv')}
       ${m('Avg approval→deposit', avgApprToDep !== null ? fmtDays(avgApprToDep) : null, 'time')}
+      ${m('Avg deposit→move-in', avgDepToMoveIn !== null ? fmtDays(avgDepToMoveIn) : null, 'time')}
     </div>
   `;
 }
@@ -2762,23 +2810,81 @@ function renderLFDetail() {
     }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
 
   } else if (lfView === 'dep') {
-    colspan = 5;
+    colspan = 6;
     src = lfFilterDetail(lfDepRows, 'date');
     if (lfPOD) src = src.filter(r => r.pod === lfPOD);
     src.sort(colSort);
+    // Build move-in lookup from tickler (PM-scheduled dates) by property+unit
+    const depMoveInLookup = {};
+    lfSMIRows.filter(r => r.property && r.unit && r.move_in).forEach(r => {
+      const key = `${r.property}|${r.unit}`;
+      const mi = parseDate(r.move_in);
+      if (mi && (!depMoveInLookup[key] || mi > depMoveInLookup[key].date))
+        depMoveInLookup[key] = { date: mi, str: r.move_in };
+    });
     head = `<tr>
       <th onclick="lfDetSort('date')">Posted Date</th>
       <th onclick="lfDetSort('payee')">Payee</th>
+      <th onclick="lfDetSort('unit')">Unit</th>
       <th onclick="lfDetSort('property')">Property</th>
       <th onclick="lfDetSort('reference')">Reference</th>
+      <th style="text-align:center">Move In</th>
       <th onclick="lfDetSort('amount')" style="text-align:right">Amount</th>
     </tr>`;
+    colspan = 7;
+
+    // Identify split payments: same property+unit+payee appearing more than once
+    const depKeyCounts = {};
+    src.forEach(r => {
+      const k = r.payee ? `${r.property}|${r.unit}|${r.payee}` : r.txn_id;
+      depKeyCounts[k] = (depKeyCounts[k] || 0) + 1;
+    });
+    const splitKeys = new Set(Object.keys(depKeyCounts).filter(k => depKeyCounts[k] > 1));
+
+    // Assign palette color per unique split group
+    const depColorIdx = {};
+    let depColorCounter = 0;
+    splitKeys.forEach(k => { depColorIdx[k] = depColorCounter++ % GROUP_PALETTES.length; });
+
+    // Sort: cluster split payments together, user sort respected within and between groups
+    const depGrpRep = {};
+    src.forEach(r => {
+      const k = r.payee ? `${r.property}|${r.unit}|${r.payee}` : r.txn_id;
+      if (splitKeys.has(k)) {
+        const v = String(r[lfDetSrt.col] || '');
+        if (!depGrpRep[k] || v < depGrpRep[k]) depGrpRep[k] = v;
+      }
+    });
+    src.sort((a, b) => {
+      const ak = a.payee ? `${a.property}|${a.unit}|${a.payee}` : a.txn_id;
+      const bk = b.payee ? `${b.property}|${b.unit}|${b.payee}` : b.txn_id;
+      const ag = splitKeys.has(ak) ? ak : null;
+      const bg = splitKeys.has(bk) ? bk : null;
+      if (ag && ag === bg) return colSort(a, b);
+      const av = ag ? (depGrpRep[ag] || '') : String(a[lfDetSrt.col] || '');
+      const bv = bg ? (depGrpRep[bg] || '') : String(b[lfDetSrt.col] || '');
+      return av.localeCompare(bv) * lfDetSrt.dir;
+    });
+
     const empty = lfDepRows.length === 0 && GIDS.lfDeposits !== '000000000' ? 'Loading…' : 'No deposits for this period';
-    body = src.map(r => `<tr>
-      <td>${fmtDate(r.date)}</td><td>${r.payee||'—'}</td><td>${r.property||'—'}</td>
-      <td>${r.reference||'—'}</td>
-      <td style="text-align:right;color:#1565c0;font-weight:600">${fmtAmt(r.amount)}</td>
-    </tr>`).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
+    body = src.map(r => {
+      const mi = depMoveInLookup[`${r.property}|${r.unit}`];
+      const miStr = mi ? fmtDate(mi.str) : '—';
+      const depKey = r.payee ? `${r.property}|${r.unit}|${r.payee}` : r.txn_id;
+      const isSplit = splitKeys.has(depKey);
+      const pal     = isSplit ? GROUP_PALETTES[depColorIdx[depKey]] : null;
+      const rowStyle = pal ? `background:${pal.bg};border-left:3px solid ${pal.border}` : '';
+      const badge    = pal ? `<span style="font-size:10px;background:${pal.badge};color:#fff;border-radius:3px;padding:1px 5px;margin-left:6px;vertical-align:middle;font-weight:600">partial</span>` : '';
+      return `<tr style="${rowStyle}">
+        <td>${fmtDate(r.date)}</td>
+        <td>${r.payee||'—'}${badge}</td>
+        <td style="font-size:12px;color:#555">${r.unit||'—'}</td>
+        <td>${r.property||'—'}</td>
+        <td>${r.reference||'—'}</td>
+        <td style="text-align:center;font-size:12px;color:#2e7d32;font-weight:600">${miStr}</td>
+        <td style="text-align:right;color:#1565c0;font-weight:600">${fmtAmt(r.amount)}</td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
   }
 
   $('lf-detail-head').innerHTML = head;
