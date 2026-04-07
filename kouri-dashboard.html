@@ -888,7 +888,7 @@ function showTab(t) {
   // Auto-load tab data on first view
   if (t === 'rx'  && rxRows.length  === 0) loadRX();
   if (t === 'ret' && retRows.length === 0) loadRET();
-  if (t === 'lf'  && lfRows.length  === 0) loadLF();
+  if (t === 'lf'  && !lfLoaded) loadLF();
 }
 // ─── DELINQUENCY ─────────────────────────────────────────────────────
 async function loadDQ() {
@@ -2062,14 +2062,17 @@ function renderRETTrend() {
 }
 
 // ─── LEASING FUNNEL ──────────────────────────────────────────────────
-// Aggregate data (Leasing Funnel tab): one row per (property, agent, date_range).
-// Filtered by Date Range column ('CW'/'LW'/'MTD') — no date parsing needed.
-// Detail chips (GC/Showings/Apps/Deposits): 4 separate 90-day tabs, date-filtered client-side.
-let lfRows    = [];   // aggregate from Leasing Funnel tab
+// POD summary is computed client-side from 4 raw 90-day tabs:
+//   LF Guest Cards → Inquiries
+//   LF Showings    → Showings completed / total
+//   LF Applications→ Apps, Pending, Approved
+//   LF Deposits    → Deposits (GL 1160)
+// All date filtering is done client-side by the showing/received/posted date.
 let lfGCRows  = [];   // guest card inquiries — 90-day raw records
 let lfShRows  = [];   // showings — 90-day raw records
 let lfAppRows = [];   // rental applications — 90-day raw records
 let lfDepRows = [];   // security deposits GL 1160 — 90-day raw records
+let lfLoaded = false;
 let lfPOD = null, lfDateRange = 'cw', lfView = 'gc';
 let lfPodSrt = { col: 'inquiries', dir: -1 };
 let lfDetSrt = { col: 'date', dir: -1 };
@@ -2104,7 +2107,7 @@ function parseDate(s) {
   return isNaN(d) ? null : d;
 }
 
-// Filter detail rows (90-day raw data) by the current date range chip
+// Filter any raw detail array by current date range chip
 function lfFilterDetail(rows, dateField) {
   const { from, to } = getLFDateBounds(lfDateRange);
   return rows.filter(r => {
@@ -2115,46 +2118,16 @@ function lfFilterDetail(rows, dateField) {
   });
 }
 
-// Filter aggregate rows by Date Range column value
-function lfFilteredRows() {
-  const key = lfDateRange.toUpperCase(); // 'CW', 'LW', 'MTD'
-  return lfRows.filter(r => r.date_range === key);
-}
-
-// ── Load aggregate ────────────────────────────────────────────────────
+// ── Load — waits for all 4 tabs, then renders ─────────────────────────
 async function loadLF() {
-  if (GIDS.leasingFunnel === '000000000') {
-    $('lf-loading').style.display = 'none';
-    $('lf-error').style.display   = '';
-    return;
-  }
+  if (lfLoaded) return;
   try {
-    const raw = await fetchGViz(GIDS.leasingFunnel);
-    lfRows = raw.map(r => ({
-      property       : r['Property']            || '',
-      pod            : r['POD']                 || '',
-      assigned_agent : r['Assigned Agent']      || '',
-      date_range     : (r['Date Range']         || '').toUpperCase(),
-      date_from      : r['Date From']           || '',
-      date_to        : r['Date To']             || '',
-      inquiries      : +r['Inquiries']          || 0,
-      showings_comp  : +r['Showings Completed'] || 0,
-      showings_cancel: +r['Showings Cancelled'] || 0,
-      showings_total : +r['Showings Total']     || 0,
-      rental_apps    : +r['Rental Apps']        || 0,
-      pending_apps   : +r['Pending Apps']       || 0,
-      approved_apps  : +r['Approved Apps']      || 0,
-      denied_apps    : +r['Denied Apps']        || 0,
-      signed_leases  : +r['Signed Leases']      || 0,
-      move_ins       : +r['Move Ins']           || 0,
-    }));
+    await Promise.all([loadLFGC(), loadLFSh(), loadLFApp(), loadLFDep()]);
+    lfLoaded = true;
     $('lf-loading').style.display = 'none';
     $('lf-content').style.display = '';
-    const cwInq = lfRows.filter(r => r.date_range === 'CW').reduce((s,r) => s + r.inquiries, 0);
-    $('lf-badge').textContent = cwInq || lfRows.length;
+    $('lf-badge').textContent = lfFilterDetail(lfGCRows, 'date').length;
     renderLF();
-    // Kick off detail loaders in the background
-    loadLFGC(); loadLFSh(); loadLFApp(); loadLFDep();
   } catch(e) {
     $('lf-loading').style.display = 'none';
     $('lf-error').style.display   = '';
@@ -2162,86 +2135,72 @@ async function loadLF() {
   }
 }
 
-// ── Load detail tabs ──────────────────────────────────────────────────
+// ── Load detail tabs (called in parallel by loadLF) ────────────────────
 async function loadLFGC() {
   if (GIDS.lfGuestCards === '000000000') return;
-  try {
-    const raw = await fetchGViz(GIDS.lfGuestCards);
-    lfGCRows = raw.map(r => ({
-      date     : r['Received On']   || '',
-      prospect : r['Prospect Name'] || '',
-      property : r['Property']      || '',
-      pod      : r['POD']           || '',
-      source   : r['Source']        || '',
-      status   : r['Status']        || '',
-      assigned : r['Assigned User'] || '',
-      email    : r['Email']         || '',
-      phone    : r['Phone']         || '',
-      move_in  : r['Move In Date']  || '',
-      bedrooms : r['Bedrooms']      || '',
-      notes    : r['Notes']         || '',
-      inq_id   : r['Inquiry ID']    || '',
-    }));
-    if (lfView === 'gc') renderLFDetail();
-  } catch(e) { console.error('LF GC load error:', e); }
+  const raw = await fetchGViz(GIDS.lfGuestCards);
+  lfGCRows = raw.map(r => ({
+    date     : r['Received On']   || '',
+    prospect : r['Prospect Name'] || '',
+    property : r['Property']      || '',
+    pod      : r['POD']           || '',
+    source   : r['Source']        || '',
+    status   : r['Status']        || '',
+    assigned : r['Assigned User'] || '',
+    email    : r['Email']         || '',
+    phone    : r['Phone']         || '',
+    move_in  : r['Move In Date']  || '',
+    bedrooms : r['Bedrooms']      || '',
+    notes    : r['Notes']         || '',
+    inq_id   : r['Inquiry ID']    || '',
+  }));
 }
 
 async function loadLFSh() {
   if (GIDS.lfShowings === '000000000') return;
-  try {
-    const raw = await fetchGViz(GIDS.lfShowings);
-    lfShRows = raw.map(r => ({
-      date         : r['Showing Date']  || '',
-      prospect     : r['Prospect Name'] || '',
-      property     : r['Property']      || '',
-      pod          : r['POD']           || '',
-      status       : r['Status']        || '',
-      assigned     : r['Assigned User'] || '',
-      showing_type : r['Showing Type']  || '',
-      notes        : r['Notes']         || '',
-      inq_id       : r['Inquiry ID']    || '',
-    }));
-    if (lfView === 'sh') renderLFDetail();
-  } catch(e) { console.error('LF Showings load error:', e); }
+  const raw = await fetchGViz(GIDS.lfShowings);
+  lfShRows = raw.map(r => ({
+    date         : r['Showing Date']  || '',
+    prospect     : r['Prospect Name'] || '',
+    property     : r['Property']      || '',
+    pod          : r['POD']           || '',
+    status       : r['Status']        || '',
+    assigned     : r['Assigned User'] || '',
+    showing_type : r['Showing Type']  || '',
+    notes        : r['Notes']         || '',
+    inq_id       : r['Inquiry ID']    || '',
+  }));
 }
 
 async function loadLFApp() {
   if (GIDS.lfApplications === '000000000') return;
-  try {
-    const raw = await fetchGViz(GIDS.lfApplications);
-    lfAppRows = raw.map(r => ({
-      date         : r['Application Date'] || '',
-      prospect     : r['Applicant Name']   || '',
-      property     : r['Property']         || '',
-      pod          : r['POD']              || '',
-      status       : r['Status']           || '',
-      decision_dt  : r['Decision Date']    || '',
-      inq_id       : r['Inquiry ID']       || '',
-      app_id       : r['Application ID']   || '',
-      monthly_rent : r['Monthly Rent']     || '',
-    }));
-    if (lfView === 'app') renderLFDetail();
-  } catch(e) { console.error('LF Apps load error:', e); }
+  const raw = await fetchGViz(GIDS.lfApplications);
+  lfAppRows = raw.map(r => ({
+    date         : r['Application Date'] || '',
+    prospect     : r['Applicant Name']   || '',
+    property     : r['Property']         || '',
+    pod          : r['POD']              || '',
+    status       : r['Status']           || '',
+    decision_dt  : r['Decision Date']    || '',
+    inq_id       : r['Inquiry ID']       || '',
+    app_id       : r['Application ID']   || '',
+    monthly_rent : r['Monthly Rent']     || '',
+  }));
 }
 
 async function loadLFDep() {
   if (GIDS.lfDeposits === '000000000') return;
-  try {
-    const raw = await fetchGViz(GIDS.lfDeposits);
-    lfDepRows = raw.map(r => ({
-      date       : r['Posted On']      || '',
-      payee      : r['Payee']          || '',
-      property   : r['Property']       || '',
-      pod        : r['POD']            || '',
-      amount     : parseFloat(r['Amount']) || 0,
-      gl_account : r['GL Account']     || '',
-      reference  : r['Reference']      || '',
-      txn_id     : r['Transaction ID'] || '',
-    }));
-    // Refresh POD table to add deposit counts, and detail if visible
-    if (lfRows.length > 0) renderLFPods();
-    if (lfView === 'dep') renderLFDetail();
-  } catch(e) { console.error('LF Deposits load error:', e); }
+  const raw = await fetchGViz(GIDS.lfDeposits);
+  lfDepRows = raw.map(r => ({
+    date       : r['Posted On']          || '',
+    payee      : r['Payee']              || '',
+    property   : r['Property']           || '',
+    pod        : r['POD']                || '',
+    amount     : parseFloat(r['Amount']) || 0,
+    gl_account : r['GL Account']         || '',
+    reference  : r['Reference']          || '',
+    txn_id     : r['Transaction ID']     || '',
+  }));
 }
 
 // ── State setters ─────────────────────────────────────────────────────
@@ -2275,43 +2234,49 @@ function lfDetSort(col) {
   renderLFDetail();
 }
 
-// ── Aggregate by POD ──────────────────────────────────────────────────
-// Uses aggregate rows for Inquiries/Showings/Apps, GL detail rows for Deposits
-function lfAggByPOD(rows) {
+// ── Aggregate by POD — built from the 4 raw detail arrays ─────────────
+function lfAggByPOD() {
   const map = {};
-  rows.forEach(r => {
-    const p = r.pod || 'Unknown';
+  const ensure = p => {
     if (!map[p]) map[p] = { pod:p, inquiries:0, showings_comp:0, showings_total:0, apps:0, pending:0, approved:0, deposits:0 };
-    const m = map[p];
-    m.inquiries      += r.inquiries;
-    m.showings_comp  += r.showings_comp;
-    m.showings_total += r.showings_total;
-    m.apps           += r.rental_apps;
-    m.pending        += r.pending_apps;
-    m.approved       += r.approved_apps;
+    return map[p];
+  };
+  // Inquiries — guest cards received in date range
+  lfFilterDetail(lfGCRows, 'date').forEach(r => {
+    ensure(r.pod || 'Unknown').inquiries++;
   });
-  // Merge deposit counts from GL 1160 detail (filtered by current date range)
-  if (lfDepRows.length > 0) {
-    lfFilterDetail(lfDepRows, 'date').forEach(r => {
-      const p = r.pod || 'Unknown';
-      if (map[p]) map[p].deposits++;
-    });
-  }
+  // Showings — by showing date
+  lfFilterDetail(lfShRows, 'date').forEach(r => {
+    const m = ensure(r.pod || 'Unknown');
+    m.showings_total++;
+    if (/complet/i.test(r.status)) m.showings_comp++;
+  });
+  // Applications — by application received date
+  lfFilterDetail(lfAppRows, 'date').forEach(r => {
+    const m = ensure(r.pod || 'Unknown');
+    m.apps++;
+    if (/decision pending|in review/i.test(r.status)) m.pending++;
+    if (/approv/i.test(r.status)) m.approved++;
+  });
+  // Deposits — GL 1160 posted date
+  lfFilterDetail(lfDepRows, 'date').forEach(r => {
+    ensure(r.pod || 'Unknown').deposits++;
+  });
   return Object.values(map);
 }
 
 // ── Render all ────────────────────────────────────────────────────────
 function renderLF() {
   $('lf-range-label').textContent = lfRangeLabel(lfDateRange);
-  const filtered = lfFilteredRows();
-  renderLFCards(filtered);
-  renderLFPods(filtered);
+  // Update badge to reflect current date range
+  $('lf-badge').textContent = lfFilterDetail(lfGCRows, 'date').length;
+  renderLFCards();
+  renderLFPods();
   renderLFDetail();
 }
 
-function renderLFCards(filtered) {
-  if (!filtered) filtered = lfFilteredRows();
-  const agg = lfAggByPOD(filtered);
+function renderLFCards() {
+  const agg = lfAggByPOD();
   const tot = agg.reduce((a, b) => ({
     inquiries: a.inquiries + b.inquiries,
     showings_comp: a.showings_comp + b.showings_comp,
@@ -2353,9 +2318,8 @@ function renderLFCards(filtered) {
   `;
 }
 
-function renderLFPods(filtered) {
-  if (!filtered) filtered = lfFilteredRows();
-  let pods = lfAggByPOD(filtered);
+function renderLFPods() {
+  let pods = lfAggByPOD();
   const { col, dir } = lfPodSrt;
   pods.sort((a, b) => {
     const av = col === 'pod' ? a.pod : (a[col] ?? 0);
@@ -2526,7 +2490,7 @@ function renderLFDetail() {
   if (GIDS.retention !== '000000000') {
     loaders.push(loadRET());
   }
-  if (GIDS.leasingFunnel !== '000000000') {
+  if (GIDS.lfGuestCards !== '000000000') {
     loaders.push(loadLF());
   }
   await Promise.all(loaders);
