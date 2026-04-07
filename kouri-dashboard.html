@@ -2806,7 +2806,7 @@ function renderLFDetail() {
       return av.localeCompare(bv) * lfDetSrt.dir;
     });
 
-    colspan = 8;
+    colspan = 10;
     head = `<tr>
       <th onclick="lfDetSort('date')">App Date</th>
       <th onclick="lfDetSort('prospect')">Applicant</th>
@@ -2814,6 +2814,8 @@ function renderLFDetail() {
       <th onclick="lfDetSort('property')">Property</th>
       <th onclick="lfDetSort('lead_source')">Lead Source</th>
       <th onclick="lfDetSort('status')">Status</th>
+      <th onclick="lfDetSort('decision_dt')">Status Date</th>
+      <th style="text-align:center" onclick="lfDetSort('decision_dt')">Days to Status</th>
       <th onclick="lfDetSort('reason')">Reason</th>
       <th onclick="lfDetSort('dep_date')">Deposit Paid</th>
     </tr>`;
@@ -2845,13 +2847,20 @@ function renderLFDetail() {
       const pal       = isGrouped ? GROUP_PALETTES[grpColorIdx[r.group_id]] : null;
       const rowStyle  = pal ? `background:${pal.bg};border-left:3px solid ${pal.border}` : '';
       const badge     = pal ? `<span style="font-size:10px;background:${pal.badge};color:#fff;border-radius:3px;padding:1px 5px;margin-left:6px;vertical-align:middle;font-weight:600">co-app</span>` : '';
+      // Status date and days-to-status
+      const decDt = r.decision_dt ? r.decision_dt.slice(0, 10) : null;  // strip time
+      const decDate = decDt ? parseDate(decDt) : null;
+      const daysToStatus = (appDate && decDate) ? Math.round((decDate - appDate) / 864e5) : null;
+      const daysStr = daysToStatus !== null ? `${daysToStatus}d` : '—';
       return `<tr style="${rowStyle}">
         <td>${fmtDate(r.date)}</td>
         <td>${r.prospect || '—'}${badge}</td>
         <td style="font-size:12px;color:#555">${r.unit || '—'}</td>
         <td>${r.property || '—'}</td>
-        <td>${r.lead_source || '—'}</td>
+        <td style="font-size:12px;color:#555">${r.lead_source || '—'}</td>
         <td style="color:${stColor};font-weight:600">${st}</td>
+        <td style="font-size:12px;color:#555">${decDt ? fmtDate(decDt) : '—'}</td>
+        <td style="text-align:center;font-size:12px;color:#555">${daysStr}</td>
         <td style="color:#666;font-size:12px">${r.reason || '—'}</td>
         <td style="color:${depMatch ? '#2e7d32' : '#bbb'};font-weight:600">${depMatch ? fmtDate(depMatch.toISOString().slice(0,10)) : ''}</td>
       </tr>`;
