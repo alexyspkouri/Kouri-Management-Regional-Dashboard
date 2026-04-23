@@ -229,6 +229,13 @@ body {
 @media (max-width: 960px) {
   .panels { grid-template-columns: 1fr; }
 }
+/* Restricted single-POD users: hide left POD summary, give full width to detail table */
+.panels.restricted-single {
+  grid-template-columns: 1fr !important;
+}
+.panels.restricted-single > .panel:first-child {
+  display: none !important;
+}
 /* ─── Panel ─── */
 .panel {
   background: white;
@@ -913,6 +920,98 @@ tbody td { padding: 9px 14px; color: #333; }
   </div>
 </div>
 <script>
+// ─── CLOUDFLARE ACCESS — POD PERMISSION MAP ───────────────────────────
+// null        = Regional (full access, no filter)
+// ['POD']     = restricted to that POD (or multiple PODs)
+// 'NO_ACCESS' = blocked entirely
+const POD_ACCESS = {
+  // Regional — full access
+  'alex@kourimanagement.com':        null,
+  'andy@kourimanagement.com':        null,
+  'augie@kourimanagement.com':       null,
+  'carlene@kourimanagement.com':     null,
+  'danielle@kourimanagement.com':    null,
+  'kim@kourimanagement.com':         null,
+  'lisa@kourimanagement.com':        null,
+  'mainoffice@kourimanagement.com':  null,
+  'michelle@kourimanagement.com':    null,
+  'sarah@kourimanagement.com':       null,
+  // POD-restricted
+  'beth@kourimanagement.com':        ['Omaha POD'],
+  'kylie@kourimanagement.com':       ['Omaha POD'],
+  'clayton@kourimanagement.com':     ['CB POD'],
+  'karlee@kourimanagement.com':      ['CB POD'],
+  'alexandra@kourimanagement.com':   ['HGIG POD'],
+  'ernesto@kourimanagement.com':     ['HGIG POD'],
+  'justin@kourimanagement.com':      ['DSM POD'],
+  'mason@kourimanagement.com':       ['DSM POD'],
+  'jennifer@kourimanagement.com':    ['Franklin POD'],
+  'isabelle@kourimanagement.com':    ['Aspen & Hillside'],
+  'skyler@kourimanagement.com':      ['Cypress POD'],
+  'tia@kourimanagement.com':         ['Measured DSM'],
+  'vania@kourimanagement.com':       ['Altoona POD'],
+  'mary@kourimanagement.com':        ['GOPAL POD', 'HANSCOM', 'GEORGIA ROW APARTMENTS'],  // verify exact POD names
+  // No access
+  'kristen@kourimanagement.com':     'NO_ACCESS',
+  'ryan@kourimanagement.com':        'NO_ACCESS',
+  'wgtmanager@kourimanagement.com':  'NO_ACCESS',
+};
+
+// Set by applyAccessControl() — null means no restriction
+let ACCESS_PODS = null;
+
+// Read the email from the Cloudflare Access JWT cookie (CF_Authorization)
+function getCFEmail() {
+  try {
+    const c = document.cookie.split(';').map(s => s.trim()).find(s => s.startsWith('CF_Authorization='));
+    if (!c) return null;
+    const jwt = c.split('=').slice(1).join('=');
+    const payload = JSON.parse(atob(jwt.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+    return (payload.email || '').toLowerCase().trim();
+  } catch(e) { return null; }
+}
+
+// Filter a row array to only rows whose .pod is in ACCESS_PODS
+function accessFilter(rows) {
+  if (!ACCESS_PODS) return rows;
+  return rows.filter(r => ACCESS_PODS.some(p => (r.pod || '').toLowerCase() === p.toLowerCase()));
+}
+
+// Apply access control — call once on page load before any data loads
+function applyAccessControl() {
+  const email = getCFEmail();
+  if (!email) return; // no CF cookie → local/dev, allow everything
+  console.log('[Access] Authenticated as:', email);
+
+  const access = POD_ACCESS[email];
+
+  if (access === 'NO_ACCESS' || access === undefined) {
+    document.body.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#f0f2f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
+        <div style="text-align:center">
+          <div style="font-size:52px;margin-bottom:20px">🔒</div>
+          <div style="font-size:22px;font-weight:700;color:#1a1a2e;margin-bottom:10px">Access Restricted</div>
+          <div style="font-size:14px;color:#888">${email} is not authorized to view this dashboard.<br>Contact your administrator for access.</div>
+        </div>
+      </div>`;
+    throw new Error('Access denied: ' + email); // halt page load
+  }
+
+  if (access === null) {
+    console.log('[Access] Regional — full access');
+    return;
+  }
+
+  // POD-restricted user
+  ACCESS_PODS = access;
+  console.log('[Access] Restricted to PODs:', ACCESS_PODS);
+
+  // Single POD: collapse left summary panel and expand detail table to full width
+  if (ACCESS_PODS.length === 1) {
+    document.querySelectorAll('.panels').forEach(p => p.classList.add('restricted-single'));
+  }
+}
+
 // ─── CONFIG ──────────────────────────────────────────────────────────
 const SHEET_ID = '1hrqBQNfYFurz9I9LEXegtgQxS4aWuMPKZsNsF5JEro8';
 const GIDS = {
@@ -1046,6 +1145,7 @@ async function loadDQ() {
       status           : r['Compliance Status']|| '',
       move_out_date    : r['Move Out Date']     || '',
     })).filter(r => (r.tenant || r.property) && !/future/i.test(r.lease));
+    if (ACCESS_PODS) dqRows = accessFilter(dqRows);
     $('dq-loading').style.display = 'none';
     $('dq-content').style.display = '';
     $('dq-badge').textContent = dqRows.length;
@@ -1262,6 +1362,7 @@ async function loadWO() {
       row.days        = daysSince(row.created_date);
       return row;
     }).filter(r => r.wo);
+    if (ACCESS_PODS) woRows = accessFilter(woRows);
 
     console.log('✅ WO Rows after mapping and filtering:', woRows.length, 'work orders');
     if (woRows.length > 0) {
@@ -1510,6 +1611,7 @@ async function loadRX() {
       compliance_status: r['compliance_status'] || '',
       synced_at    : r['synced_at']        || '',
     }));
+    if (ACCESS_PODS) rxRows = accessFilter(rxRows);
     $('rx-loading').style.display = 'none';
     $('rx-content').style.display = '';
     $('rx-badge').textContent = rxRows.length;
@@ -1718,6 +1820,7 @@ async function loadRET() {
       bucket    : r['Tenure Bucket'] || '',
       retained  : r['Retained']      || '',
     }));
+    if (ACCESS_PODS) retRows = accessFilter(retRows);
     $('ret-loading').style.display = 'none';
     $('ret-content').style.display = '';
     $('ret-badge').textContent = retRows.length;
@@ -2669,6 +2772,7 @@ async function loadLFGC() {
     notes        : r['Notes']                || '',
     inq_id       : r['Inquiry ID']           || '',
   }));
+  if (ACCESS_PODS) lfGCRows = accessFilter(lfGCRows);
 }
 
 async function loadLFSh() {
@@ -2686,6 +2790,7 @@ async function loadLFSh() {
     notes        : r['Notes']         || '',
     inq_id       : r['Inquiry ID']    || '',
   }));
+  if (ACCESS_PODS) lfShRows = accessFilter(lfShRows);
 }
 
 async function loadLFApp() {
@@ -2707,6 +2812,7 @@ async function loadLFApp() {
     app_id       : r['Application ID']         || '',
     group_id     : r['Application Group ID']   || '',
   }));
+  if (ACCESS_PODS) lfAppRows = accessFilter(lfAppRows);
 }
 
 async function loadLFDep() {
@@ -2725,6 +2831,7 @@ async function loadLFDep() {
       txn_id     : r['Transaction ID']     || '',
     }))
     .filter(r => r.unit && r.amount > 0);  // debits with a unit only
+  if (ACCESS_PODS) lfDepRows = accessFilter(lfDepRows);
   // Debug: open browser console to inspect what loaded
   console.log('[LF Deposits] Total rows:', lfDepRows.length);
   if (lfDepRows.length > 0) {
@@ -2764,6 +2871,7 @@ async function loadLFSMI() {
     move_out  : r['Move Out Date'] || '',
     status    : r['Status']        || '',
   }));
+  if (ACCESS_PODS) lfSMIRows = accessFilter(lfSMIRows);
   console.log('[LF SMI] Rows loaded:', lfSMIRows.length);
   if (lfSMIRows.length > 0) {
     console.log('[LF SMI] Sample:', lfSMIRows.slice(0,3).map(r => `${r.property} | ${r.unit} | ${r.tenant} | ${r.move_in}`).join('\n  '));
@@ -2796,6 +2904,7 @@ async function loadLFVacancy() {
     flooring     : r['Flooring']           || '',
     cleaning     : r['Cleaning']           || '',
   }));
+  if (ACCESS_PODS) lfVacRows = accessFilter(lfVacRows);
   console.log('[LF VAC] Rows loaded:', lfVacRows.length);
 }
 
@@ -2812,6 +2921,7 @@ async function loadLFInspections() {
     inspector : r['Inspector']       || '',
     notes     : r['Notes']           || '',
   }));
+  if (ACCESS_PODS) lfInspRows = accessFilter(lfInspRows);
   console.log('[LF INSP] Rows loaded:', lfInspRows.length);
 }
 
@@ -3444,6 +3554,7 @@ function renderLFDetail() {
 
 // ─── INIT ─────────────────────────────────────────────────────────────
 (async () => {
+  applyAccessControl(); // enforce Cloudflare Access POD restrictions before anything loads
   $('lastUpdated').textContent = 'Refreshed ' + new Date().toLocaleString('en-US',
     { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
   // Refresh button functionality
