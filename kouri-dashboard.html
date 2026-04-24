@@ -1391,7 +1391,14 @@ async function loadWO() {
       row.days        = daysSince(row.created_date);
       return row;
     }).filter(r => r.wo);
-    if (ACCESS_PODS) woRows = accessFilter(woRows);
+    if (ACCESS_PODS) {
+      const rawWOPods = [...new Set(woRows.map(r => r.pod))].sort();
+      console.log('[Access] WO — POD names in data:', rawWOPods);
+      woRows = accessFilter(woRows);
+      console.log('[Access] WO — rows after filter:', woRows.length);
+      const banner = document.getElementById('access-debug-banner');
+      if (banner) banner.innerHTML += `<br><span style="color:#80cbc4">WO PODs: ${rawWOPods.join(', ')}</span>`;
+    }
 
     console.log('✅ WO Rows after mapping and filtering:', woRows.length, 'work orders');
     if (woRows.length > 0) {
