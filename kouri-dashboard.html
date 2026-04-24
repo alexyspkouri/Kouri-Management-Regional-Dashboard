@@ -3151,7 +3151,7 @@ function renderLFCards() {
         .sort((a, b) => a - b)[0];
       return earliest ? (earliest - adDay) / 864e5 : null;
     }).filter(v => v !== null && v >= 0);
-  const avgApprToDep = apprToDepTimes.length ? apprToDepTimes.reduce((a,b)=>a+b,0) / apprToDepTimes.length : 0;
+  const avgApprToDep = apprToDepTimes.length ? apprToDepTimes.reduce((a,b)=>a+b,0) / apprToDepTimes.length : null;
 
   // Avg deposit→move-in: tickler-based lookup by POD+normUnit
   // POD is consistent across data sources; unit normalized to strip "Unit "/"Apt " prefixes
@@ -3203,7 +3203,7 @@ function renderLFCards() {
       <div class="card-value green">${deposits}</div>
       <div class="card-sub">security deposits collected</div>
       ${m('Conv from approved apps', depConv !== null ? depConv + '%' : null, 'conv')}
-      ${m('Avg approval→deposit', avgApprToDep !== null ? fmtDays(avgApprToDep) : null, 'time')}
+      ${m('Avg approval→deposit', avgApprToDep !== null ? fmtDays(avgApprToDep) : 'NA', 'time')}
       ${m('Avg deposit→move-in', avgDepToMoveIn !== null ? fmtDays(avgDepToMoveIn) : null, 'time')}
     </div>
   `;
