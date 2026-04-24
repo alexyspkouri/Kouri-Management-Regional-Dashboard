@@ -762,7 +762,7 @@ tbody td { padding: 9px 14px; color: #333; }
             <thead>
               <tr>
                 <th>Property</th>
-                <th style="text-align:center">Units</th>
+                <th style="text-align:center">Tenants</th>
                 <th style="color:#2e7d32;text-align:center">Retained</th>
                 <th>Rate</th>
               </tr>
@@ -1416,7 +1416,8 @@ async function loadWO() {
         over60: parseInt(r['WOs Over 60 Days']) || 0,
         res7: parseInt(r['Resident WOs Over 7 Days']) || 0,
         resNew: parseInt(r['Resident WOs New']) || 0
-      })).filter(r => r.pod);  // Filter out empty rows
+      })).filter(r => r.pod);
+      if (ACCESS_PODS) woSummaryRows = accessFilter(woSummaryRows);
       console.log('📊 WO Summary loaded:', woSummaryRows.length, 'PODs');
       console.log('📋 PODs loaded:', woSummaryRows.map(s => s.pod));
     } catch(e) {
@@ -1439,15 +1440,16 @@ async function loadWO() {
 function renderWOCards() {
   let total, over60, res7, resNew, other;
 
-  // Use WO Summary data if available (pre-calculated on server)
-  if (woSummaryRows && woSummaryRows.length > 0) {
+  // For restricted users always calculate from woRows (already access-filtered).
+  // For regional users use woSummaryRows if available (pre-calculated, faster).
+  if (!ACCESS_PODS && woSummaryRows && woSummaryRows.length > 0) {
     over60 = woSummaryRows.reduce((s, r) => s + r.over60, 0);
     res7   = woSummaryRows.reduce((s, r) => s + r.res7, 0);
     resNew = woSummaryRows.reduce((s, r) => s + r.resNew, 0);
-    total  = woRows.length;  // Total from all work orders
+    total  = woRows.length;
     other  = total - over60 - res7 - resNew;
   } else {
-    // Fallback: calculate from work order rows
+    // Calculate directly from (access-filtered) woRows
     total  = woRows.length;
     over60 = woRows.filter(r => r.wo_category === 'Over 60 Days').length;
     res7   = woRows.filter(r => r.wo_category === 'Resident WOs Over 7 Days').length;
