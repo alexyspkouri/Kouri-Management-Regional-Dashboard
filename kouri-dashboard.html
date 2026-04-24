@@ -926,7 +926,7 @@ tbody td { padding: 9px 14px; color: #333; }
 // 'NO_ACCESS' = blocked entirely
 const POD_ACCESS = {
   // Regional — full access
-  'alex@kourimanagement.com':        null,
+  'alex@kourimanagement.com':        ['Altoona POD'],  // TEMP — testing Vania's view
   'andy@kourimanagement.com':        null,
   'augie@kourimanagement.com':       null,
   'carlene@kourimanagement.com':     null,
@@ -980,7 +980,10 @@ function accessFilter(rows) {
 // Apply access control — call once on page load before any data loads
 function applyAccessControl() {
   const email = getCFEmail();
-  if (!email) return; // no CF cookie → local/dev, allow everything
+  if (!email) {
+    console.warn('[Access] No CF_Authorization cookie found — running in open mode (dev/local or cookie not set)');
+    return;
+  }
   console.log('[Access] Authenticated as:', email);
 
   const access = POD_ACCESS[email];
@@ -1010,6 +1013,13 @@ function applyAccessControl() {
   if (ACCESS_PODS.length === 1) {
     document.querySelectorAll('.panels').forEach(p => p.classList.add('restricted-single'));
   }
+
+  // Debug banner — shows filtered POD(s) so we can confirm the name matches the data
+  const banner = document.createElement('div');
+  banner.id = 'access-debug-banner';
+  banner.style.cssText = 'position:fixed;bottom:12px;right:12px;background:#1a1a2e;color:#7eeec4;font-size:11px;font-family:monospace;padding:8px 12px;border-radius:6px;z-index:9999;max-width:320px;line-height:1.6;box-shadow:0 2px 8px rgba(0,0,0,0.3)';
+  banner.innerHTML = `🔐 <strong>${email}</strong><br>Filtered to: <strong>${ACCESS_PODS.join(', ')}</strong><br><span style="color:#aaa;font-size:10px">Check console for POD names in data</span>`;
+  document.body.appendChild(banner);
 }
 
 // ─── CONFIG ──────────────────────────────────────────────────────────
@@ -1145,7 +1155,13 @@ async function loadDQ() {
       status           : r['Compliance Status']|| '',
       move_out_date    : r['Move Out Date']     || '',
     })).filter(r => (r.tenant || r.property) && !/future/i.test(r.lease));
-    if (ACCESS_PODS) dqRows = accessFilter(dqRows);
+    if (ACCESS_PODS) {
+      const rawPods = [...new Set(dqRows.map(r => r.pod))].sort();
+      console.log('[Access] DQ — POD names in data:', rawPods);
+      console.log('[Access] DQ — filtering to:', ACCESS_PODS);
+      dqRows = accessFilter(dqRows);
+      console.log('[Access] DQ — rows after filter:', dqRows.length);
+    }
     $('dq-loading').style.display = 'none';
     $('dq-content').style.display = '';
     $('dq-badge').textContent = dqRows.length;
