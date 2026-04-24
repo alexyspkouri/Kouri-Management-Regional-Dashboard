@@ -926,7 +926,7 @@ tbody td { padding: 9px 14px; color: #333; }
 // 'NO_ACCESS' = blocked entirely
 const POD_ACCESS = {
   // Regional — full access
-  'alex@kourimanagement.com':        ['Altoona POD'],  // TEMP — testing Vania's view
+  'alex@kourimanagement.com':        ['Altoona POD'],  // TEMP — mirroring Vania's access
   'andy@kourimanagement.com':        null,
   'augie@kourimanagement.com':       null,
   'carlene@kourimanagement.com':     null,
@@ -971,10 +971,17 @@ function getCFEmail() {
   } catch(e) { return null; }
 }
 
-// Filter a row array to only rows whose .pod is in ACCESS_PODS
+// Filter a row array to only rows whose .pod is in ACCESS_PODS.
+// Uses flexible matching: either string contains the other (handles "Altoona" vs "Altoona POD").
 function accessFilter(rows) {
   if (!ACCESS_PODS) return rows;
-  return rows.filter(r => ACCESS_PODS.some(p => (r.pod || '').toLowerCase() === p.toLowerCase()));
+  return rows.filter(r => {
+    const rowPod = (r.pod || '').toLowerCase().trim();
+    return ACCESS_PODS.some(p => {
+      const ap = p.toLowerCase().trim();
+      return rowPod === ap || rowPod.includes(ap) || ap.includes(rowPod);
+    });
+  });
 }
 
 // Apply access control — call once on page load before any data loads
@@ -1161,6 +1168,12 @@ async function loadDQ() {
       console.log('[Access] DQ — filtering to:', ACCESS_PODS);
       dqRows = accessFilter(dqRows);
       console.log('[Access] DQ — rows after filter:', dqRows.length);
+      // Update debug banner with actual POD names so no console needed
+      const banner = document.getElementById('access-debug-banner');
+      if (banner) {
+        banner.innerHTML += `<br><span style="color:#ffd54f">PODs in data: ${rawPods.join(', ')}</span>`
+          + `<br><span style="color:${dqRows.length > 0 ? '#7eeec4' : '#ef9a9a'}">Matched rows: ${dqRows.length}</span>`;
+      }
     }
     $('dq-loading').style.display = 'none';
     $('dq-content').style.display = '';
