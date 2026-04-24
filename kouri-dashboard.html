@@ -906,6 +906,7 @@ tbody td { padding: 9px 14px; color: #333; }
           <div class="chips" style="margin-left:auto">
             <div class="chip on" id="vac-vs-prop" onclick="setVacView('prop')">🏢 Property Summary</div>
             <div class="chip"   id="vac-vs-vdet" onclick="setVacView('vdet')">🔍 Vacant Detail</div>
+            <div class="chip"   id="vac-vs-trend" onclick="setVacView('trend')">📈 Trend</div>
           </div>
         </div>
         <div class="tbl-wrap" id="vac-detail-wrap">
@@ -1037,6 +1038,7 @@ const GIDS = {
   lfDeposits:       '820311706',
   lfSchedMoveIns:   '1550438509',
   lfVacancy:        '1526844573',
+  lfVacHistory:     '000000000',  // set after first sync creates the tab
   lfInspections:    '1336164150',
 };
 // ─── JSONP DATA FETCH (works from file:// — no CORS needed) ──────────
@@ -2329,8 +2331,9 @@ let lfShRows  = [];   // showings — 90-day raw records
 let lfAppRows = [];   // rental applications — 90-day raw records
 let lfDepRows = [];   // security deposits GL 1160 — 90-day raw records
 let lfSMIRows = [];   // scheduled move-ins from tickler
-let lfVacRows  = [];   // unit vacancy detail (shared with standalone vac tab)
-let lfInspRows = [];   // inspection detail — 180-day rolling window
+let lfVacRows     = [];   // unit vacancy detail (shared with standalone vac tab)
+let lfVacHistRows = [];   // vacancy history snapshots — one row per POD per sync
+let lfInspRows    = [];   // inspection detail — 180-day rolling window
 let lfLoaded   = false;
 let vacLoaded  = false;
 let lfPOD = null, lfDateRange = 'cw', lfView = 'gc';
@@ -2396,6 +2399,7 @@ async function loadVac() {
   try {
     await Promise.all([
       loadLFVacancy(),      // populates lfVacRows
+      loadLFVacHistory(),   // populates lfVacHistRows (no-op if GID not yet set)
       loadLFInspections(),  // populates lfInspRows (no-op if GID not yet set)
       lfSMIRows.length === 0 ? loadLFSMI() : Promise.resolve(),
     ]);
@@ -2418,12 +2422,10 @@ function renderVac() {
 
 function setVacView(sv) {
   vacView = sv;
-  ['prop','vdet'].forEach(k => {
+  ['prop','vdet','trend'].forEach(k => {
     const el = $('vac-vs-' + k); if (el) el.classList.toggle('on', k === sv);
-    // Also sync LF sub-chips if they exist
-    const el2 = $('lf-vs-' + k); if (el2) el2.classList.toggle('on', k === sv);
   });
-  const titles = { prop: 'Property Summary', vdet: 'Vacant Detail' };
+  const titles = { prop: 'Property Summary', vdet: 'Vacant Detail', trend: 'Vacancy Trend' };
   const rt = $('vac-right-title'); if (rt) rt.textContent = titles[sv] || sv;
   renderVacDetail();
 }
@@ -2642,10 +2644,123 @@ function renderVacDetail() {
     }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
   }
 
+  if (vacView === 'trend') {
+    $('vac-detail-head').innerHTML = '';
+    $('vac-detail-body').innerHTML = `<tr><td style="padding:0;border:none"><div id="vac-trend-container" style="padding:20px 16px"></div></td></tr>`;
+    $('vac-detail-footer').textContent = '';
+    renderVacTrend();
+    return;
+  }
+
   $('vac-detail-head').innerHTML = head;
   $('vac-detail-body').innerHTML = body;
   const recLabel = vacView === 'vdet' ? 'unit' : 'property';
   $('vac-detail-footer').textContent = (vacView === 'prop' ? vacAggByProperty(src).length : src.filter(r => /vacant/i.test(r.unit_status)).length) + ' ' + recLabel + (vacPOD ? ' · ' + vacPOD : '');
+}
+
+function renderVacTrend() {
+  const container = $('vac-trend-container');
+  if (!container) return;
+
+  if (GIDS.lfVacHistory === '000000000' || lfVacHistRows.length === 0) {
+    container.innerHTML = '<div style="padding:40px;text-align:center;color:#aaa;font-size:13px">No trend data yet — run a sync to start building history.</div>';
+    return;
+  }
+
+  // Filter by selected POD
+  const src = vacPOD
+    ? lfVacHistRows.filter(r => r.pod === vacPOD)
+    : lfVacHistRows;
+
+  if (src.length === 0) {
+    container.innerHTML = '<div style="padding:40px;text-align:center;color:#aaa;font-size:13px">No history data for this POD.</div>';
+    return;
+  }
+
+  // Aggregate by date — sum across all PODs (or just the selected one)
+  const byDate = {};
+  src.forEach(r => {
+    if (!byDate[r.date]) byDate[r.date] = { vacant: 0, gt45: 0 };
+    byDate[r.date].vacant += r.vacant;
+    byDate[r.date].gt45   += r.gt45;
+  });
+
+  // Sort dates ascending, deduplicate (keep last entry per date)
+  const dates = [...new Set(src.map(r => r.date))].sort();
+  const vacantVals = dates.map(d => byDate[d].vacant);
+  const gt45Vals   = dates.map(d => byDate[d].gt45);
+
+  // SVG layout
+  const W = 620, H = 280, PL = 36, PR = 16, PT = 24, PB = 48;
+  const cW = W - PL - PR, cH = H - PT - PB;
+  const n = dates.length;
+  const xPos = i => PL + (n > 1 ? i / (n - 1) * cW : cW / 2);
+
+  const allVals = [...vacantVals, ...gt45Vals].filter(v => v !== null);
+  const maxV = Math.max(...allVals, 1);
+  const yScale = v => PT + cH - (v / maxV) * cH;
+
+  // Grid lines
+  const gridSteps = 4;
+  let gridLines = '';
+  for (let i = 0; i <= gridSteps; i++) {
+    const v = Math.round(maxV / gridSteps * i);
+    const y = yScale(v);
+    gridLines += `<line x1="${PL}" y1="${y}" x2="${W - PR}" y2="${y}" stroke="#eee" stroke-width="1"/>`;
+    gridLines += `<text x="${PL - 5}" y="${y + 4}" text-anchor="end" font-size="10" fill="#aaa">${v}</text>`;
+  }
+
+  // X-axis labels — show every Nth to avoid crowding
+  const skip = n > 12 ? Math.ceil(n / 12) : 1;
+  let xLabels = '';
+  dates.forEach((d, i) => {
+    if (i % skip !== 0 && i !== n - 1) return;
+    const dt = parseDate(d);
+    const label = dt ? dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : d;
+    xLabels += `<text x="${xPos(i)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="#999">${label}</text>`;
+  });
+
+  // Build SVG path for a series
+  const makePath = vals => vals.map((v, i) => `${i === 0 ? 'M' : 'L'}${xPos(i)},${yScale(v)}`).join(' ');
+
+  // Area fills
+  const areaPath = (vals, color) => {
+    const path = makePath(vals);
+    return `<path d="${path} L${xPos(n-1)},${PT+cH} L${xPos(0)},${PT+cH} Z" fill="${color}" fill-opacity="0.08"/>`;
+  };
+
+  const vacPath  = makePath(vacantVals);
+  const gt45Path = makePath(gt45Vals);
+
+  // Dots for last point
+  const lastDot = (vals, color) => {
+    const i = n - 1;
+    return `<circle cx="${xPos(i)}" cy="${yScale(vals[i])}" r="5" fill="${color}" stroke="white" stroke-width="2"/>
+      <text x="${xPos(i)}" y="${yScale(vals[i]) - 9}" text-anchor="middle" font-size="10" font-weight="600" fill="${color}">${vals[i]}</text>`;
+  };
+
+  // Legend
+  const legend = `
+    <rect x="${PL}" y="6" width="10" height="10" fill="#e65100" rx="2"/>
+    <text x="${PL + 13}" y="15" font-size="11" fill="#555">Net Vacant</text>
+    <rect x="${PL + 90}" y="6" width="10" height="10" fill="#b71c1c" rx="2"/>
+    <text x="${PL + 103}" y="15" font-size="11" fill="#555">&gt;45 Days Vacant</text>`;
+
+  container.innerHTML = `
+    <svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;max-width:${W}px">
+      ${gridLines}
+      ${areaPath(vacantVals, '#e65100')}
+      ${areaPath(gt45Vals,   '#b71c1c')}
+      <path d="${vacPath}"  fill="none" stroke="#e65100" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+      <path d="${gt45Path}" fill="none" stroke="#b71c1c" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+      ${n > 0 ? lastDot(vacantVals, '#e65100') : ''}
+      ${n > 0 ? lastDot(gt45Vals,   '#b71c1c') : ''}
+      ${xLabels}
+      ${legend}
+    </svg>
+    <div style="font-size:11px;color:#aaa;margin-top:8px;padding-top:8px;border-top:1px solid #f0f0f0">
+      ${dates.length} snapshots · ${vacPOD || 'All PODs'} · Each point = one sync run
+    </div>`;
 }
 
 let lfPodSrt = { col: 'inquiries', dir: -1 };
@@ -2916,6 +3031,20 @@ async function loadLFVacancy() {
   }));
   if (ACCESS_PODS) lfVacRows = accessFilter(lfVacRows);
   console.log('[LF VAC] Rows loaded:', lfVacRows.length);
+}
+
+async function loadLFVacHistory() {
+  if (GIDS.lfVacHistory === '000000000') return;
+  const raw = await fetchGViz(GIDS.lfVacHistory);
+  lfVacHistRows = raw.map(r => ({
+    date   : r['Date']    || '',
+    pod    : r['POD']     || '',
+    total  : parseInt(r['Total'])  || 0,
+    vacant : parseInt(r['Vacant']) || 0,
+    gt45   : parseInt(r['GT45'])   || 0,
+  })).filter(r => r.date && r.pod);
+  if (ACCESS_PODS) lfVacHistRows = accessFilter(lfVacHistRows);
+  console.log('[LF VAC HIST] Rows loaded:', lfVacHistRows.length);
 }
 
 async function loadLFInspections() {
