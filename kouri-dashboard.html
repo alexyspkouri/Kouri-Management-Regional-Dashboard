@@ -821,6 +821,7 @@ tbody td { padding: 9px 14px; color: #333; }
       <div class="chips">
         <div class="chip on" id="lf-dr-cw"  onclick="setLFDateRange('cw')">Current Week</div>
         <div class="chip"    id="lf-dr-lw"  onclick="setLFDateRange('lw')">Last Week</div>
+        <div class="chip"    id="lf-dr-pw"  onclick="setLFDateRange('pw')">Prior Week</div>
         <div class="chip"    id="lf-dr-mtd" onclick="setLFDateRange('mtd')">Month to Date</div>
         <div class="chip"    id="lf-dr-lm"  onclick="setLFDateRange('lm')">Last Month</div>
         <div class="chip"    id="lf-dr-pm"  onclick="setLFDateRange('pm')">Prior Month</div>
@@ -2779,6 +2780,11 @@ function getLFDateBounds(key) {
     const lSat = new Date(sunday); lSat.setDate(sunday.getDate() - 1); lSat.setHours(23,59,59,999);
     return { from: lSun, to: lSat };
   }
+  if (key === 'pw') {
+    const pwSun = new Date(sunday); pwSun.setDate(sunday.getDate() - 14);
+    const pwSat = new Date(sunday); pwSat.setDate(sunday.getDate() - 8); pwSat.setHours(23,59,59,999);
+    return { from: pwSun, to: pwSat };
+  }
   if (key === 'lm') {
     const lmStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
     const lmEnd   = new Date(today.getFullYear(), today.getMonth(), 0); lmEnd.setHours(23,59,59,999);
@@ -3067,7 +3073,7 @@ async function loadLFInspections() {
 // ── State setters ─────────────────────────────────────────────────────
 function setLFDateRange(key) {
   lfDateRange = key;
-  ['cw','lw','mtd','lm','pm'].forEach(k => $('lf-dr-' + k).classList.toggle('on', k === key));
+  ['cw','lw','pw','mtd','lm','pm'].forEach(k => $('lf-dr-' + k).classList.toggle('on', k === key));
   renderLF();
 }
 
