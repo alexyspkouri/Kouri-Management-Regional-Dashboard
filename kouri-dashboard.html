@@ -3810,3 +3810,30 @@ function renderLFDetail() {
         setTimeout(() => {
           refreshBtn.innerHTML = '<span id="refreshBtnIcon">⟳</span> Refresh';
          
+          refreshBtn.disabled = false;
+        }, 3500);
+      }
+    });
+  }
+  const loaders = [loadDQ(), loadWO()];
+  if (GIDS.receipts !== '000000000') {
+    loaders.push(loadRX());
+  }
+  if (GIDS.retention !== '000000000') {
+    loaders.push(loadRET());
+  }
+  if (GIDS.lfGuestCards !== '000000000') {
+    loaders.push(loadLF());
+  }
+  await Promise.all(loaders);
+  // Load monthly data after main tabs (non-blocking)
+  if (GIDS.retentionMonthly !== '000000000') {
+    loadRETMonthly();
+  }
+  if (GIDS.retentionHistory !== '000000000') {
+    loadRETHistory();
+  }
+})();
+</script>
+</body>
+</html>
