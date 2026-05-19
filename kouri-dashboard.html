@@ -3187,10 +3187,17 @@ function renderLFCards() {
   const deposits  = depKeySet.size;
 
   // ── Inquiries: avg time to first contact ─────────────────────────────
+  // Never-contacted cards (blank Time to 1st Contact) are excluded from the avg
+  // so they don't drag it toward zero. They are surfaced separately below.
   const ttcVals  = gcRows.map(r => parseDuration(r.time_to_contact)).filter(v => v !== null && v >= 0);
   const avgTTC   = ttcVals.length ? ttcVals.reduce((a,b)=>a+b,0) / ttcVals.length : null;
   const tpVals   = gcRows.map(r => parseFloat(r.touch_points)).filter(v => !isNaN(v) && v >= 0);
   const avgTP    = tpVals.length ? tpVals.reduce((a,b)=>a+b,0) / tpVals.length : null;
+  // Not-contacted = guest cards with no Time to 1st Contact value
+  const notContacted = gcRows.filter(r => parseDuration(r.time_to_contact) === null).length;
+  const totalGC      = gcRows.length;
+  const notContactedPct = totalGC ? Math.round((notContacted / totalGC) * 100) : 0;
+  const notContactedStr = totalGC ? `${notContacted} / ${totalGC} (${notContactedPct}%)` : null;
   const srcCounts = {};
   gcRows.forEach(r => { if (r.source) srcCounts[r.source] = (srcCounts[r.source] || 0) + 1; });
   const topSource = Object.keys(srcCounts).sort((a,b) => srcCounts[b] - srcCounts[a])[0] || null;
@@ -3316,6 +3323,7 @@ function renderLFCards() {
       <div class="card-sub">guest cards received</div>
       ${m('Avg contact time', avgTTC !== null ? fmtMins(avgTTC) : null, 'time')}
       ${m('Avg touch points', avgTP !== null ? avgTP.toFixed(1) : null, 'time')}
+      ${m('Not contacted', notContactedStr, 'time')}
       ${m('Top source', topSource, 'conv')}
     </div>
     <div class="card" onclick="setLFView('sh')" style="cursor:pointer">
@@ -3801,30 +3809,4 @@ function renderLFDetail() {
         console.error('Request error:', error);
         setTimeout(() => {
           refreshBtn.innerHTML = '<span id="refreshBtnIcon">⟳</span> Refresh';
-          refreshBtn.disabled = false;
-        }, 3500);
-      }
-    });
-  }
-  const loaders = [loadDQ(), loadWO()];
-  if (GIDS.receipts !== '000000000') {
-    loaders.push(loadRX());
-  }
-  if (GIDS.retention !== '000000000') {
-    loaders.push(loadRET());
-  }
-  if (GIDS.lfGuestCards !== '000000000') {
-    loaders.push(loadLF());
-  }
-  await Promise.all(loaders);
-  // Load monthly data after main tabs (non-blocking)
-  if (GIDS.retentionMonthly !== '000000000') {
-    loadRETMonthly();
-  }
-  if (GIDS.retentionHistory !== '000000000') {
-    loadRETHistory();
-  }
-})();
-</script>
-</body>
-</html>
+         
