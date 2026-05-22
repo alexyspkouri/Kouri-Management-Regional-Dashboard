@@ -1586,10 +1586,18 @@ function podSort(tab, col) {
     dqPodSrt.dir = dqPodSrt.col === col ? -dqPodSrt.dir : -1;
     dqPodSrt.col = col;
     renderDQPods();
-  } else {
+  } else if (tab === 'wo') {
     woPodSrt.dir = woPodSrt.col === col ? -woPodSrt.dir : -1;
     woPodSrt.col = col;
     renderWOPods();
+  } else if (tab === 'rx') {
+    rxPodSrt.dir = rxPodSrt.col === col ? -rxPodSrt.dir : -1;
+    rxPodSrt.col = col;
+    renderRXPods();
+  } else if (tab === 'ret') {
+    if (retPodSrt.col === col) retPodSrt.dir *= -1;
+    else { retPodSrt.col = col; retPodSrt.dir = col === 'pod' ? 1 : -1; }
+    renderRETPoDs();
   }
 }
 function detSort(tab, col) {
@@ -2178,14 +2186,6 @@ function renderRETMonthly(rows) {
       <td style="text-align:center;color:${m.moveIns > 0 ? '#1565c0' : '#bbb'};font-weight:${m.moveIns > 0 ? '600' : '400'}">${m.moveIns || '—'}</td>
     </tr>`;
   }).join('');
-}
-
-function podSort(tab, col) {
-  if (tab === 'ret') {
-    if (retPodSrt.col === col) retPodSrt.dir *= -1;
-    else { retPodSrt.col = col; retPodSrt.dir = col === 'pod' ? 1 : -1; }
-    renderRETPoDs();
-  }
 }
 
 function renderRETTrend() {
