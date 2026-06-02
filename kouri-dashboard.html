@@ -3803,4 +3803,126 @@ function renderLFDetail() {
       const pal     = isSplit ? GROUP_PALETTES[depColorIdx[depKey]] : null;
       const rowStyle = pal ? `background:${pal.bg};border-left:3px solid ${pal.border}` : '';
       const badge    = pal ? `<span style="font-size:10px;background:${pal.badge};color:#fff;border-radius:3px;padding:1px 5px;margin-left:6px;vertical-align:middle;font-weight:600">partial</span>` : '';
-      return `<tr style="${ro
+      return `<tr style="${rowStyle}">
+        <td>${fmtDate(r.date)}</td>
+        <td>${r.payee||'—'}${badge}</td>
+        <td style="font-size:12px;color:#555">${r.unit||'—'}</td>
+        <td>${r.property||'—'}</td>
+        <td>${r.reference||'—'}</td>
+        <td style="text-align:center;font-size:12px;color:#1565c0">${appDateStr}</td>
+        <td style="text-align:center;font-size:12px;color:#2e7d32;font-weight:600">${miStr}</td>
+        <td style="text-align:right;color:#1565c0;font-weight:600">${fmtAmt(r.amount)}</td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
+  }
+  $('lf-detail-head').innerHTML = head;
+  $('lf-detail-body').innerHTML = body;
+  $('lf-detail-footer').textContent = src.length + ' record' + (src.length!==1?'s':'') + (lfPOD ? ' · ' + lfPOD : '');
+}
+// ─── INIT ─────────────────────────────────────────────────────────────
+(async () => {
+  applyAccessControl();
+  $('lastUpdated').textContent = 'Refreshed ' + new Date().toLocaleString('en-US',
+    { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
+  const CLOUD_FUNCTION_URL = 'https://us-central1-appfolio-dashboard-491122.cloudfunctions.net/sync_appfolio_data';
+  const refreshBtn = document.getElementById('refreshBtn');
+  if (refreshBtn) {
+    const SYNC_STEPS = [
+      { label: 'Step 1/13 · Delinquency report',    dur: 6  },
+      { label: 'Step 2/13 · Work orders',            dur: 5  },
+      { label: 'Step 3/13 · Rent roll',              dur: 7  },
+      { label: 'Step 4/13 · Move ins / move outs',   dur: 5  },
+      { label: 'Step 5/13 · Renewals',               dur: 4  },
+      { label: 'Step 6/13 · Occupancy metrics',      dur: 5  },
+      { label: 'Step 7/13 · Leasing agents',         dur: 4  },
+      { label: 'Step 8/13 · Retention',              dur: 6  },
+      { label: 'Step 9/13 · Retention monthly',      dur: 5  },
+      { label: 'Step 10/13 · Guest cards',           dur: 7  },
+      { label: 'Step 11/13 · Showings',              dur: 5  },
+      { label: 'Step 12/13 · Applications',          dur: 6  },
+      { label: 'Step 13/13 · Security deposits GL',  dur: 5  },
+    ];
+    const TOTAL_DUR = SYNC_STEPS.reduce((s, x) => s + x.dur, 0);
+    let syncTimers = [];
+    function clearSyncTimers() { syncTimers.forEach(clearTimeout); syncTimers = []; }
+    function startProgressBar() {
+      const bar   = $('sync-bar-fill');
+      const label = $('sync-step-label');
+      const pct   = $('sync-pct-label');
+      const prog  = $('sync-progress');
+      bar.className = '';
+      bar.style.width = '0%';
+      label.textContent = 'Connecting to AppFolio…';
+      pct.textContent = '0%';
+      prog.classList.add('visible');
+      let elapsed = 0;
+      SYNC_STEPS.forEach((step, i) => {
+        const delay    = elapsed * 1000;
+        const progress = Math.min(((elapsed + step.dur) / TOTAL_DUR) * 90, 90);
+        const label_text = step.label;
+        const t = setTimeout(() => {
+          bar.style.width = progress.toFixed(1) + '%';
+          label.textContent = label_text;
+          pct.textContent = Math.round(progress) + '%';
+        }, delay);
+        syncTimers.push(t);
+        elapsed += step.dur;
+      });
+    }
+    function finishProgressBar(success) {
+      clearSyncTimers();
+      const bar   = $('sync-bar-fill');
+      const label = $('sync-step-label');
+      const pct   = $('sync-pct-label');
+      const prog  = $('sync-progress');
+      bar.style.width = '100%';
+      bar.className = success ? 'done' : 'error';
+      pct.style.color = success ? '#7eeec4' : '#ef9a9a';
+      pct.textContent = '100%';
+      label.textContent = success ? '✓ Sync complete — reloading…' : '✕ Sync failed';
+      setTimeout(() => {
+        prog.classList.remove('visible');
+        bar.style.width = '0%';
+        bar.className = '';
+        pct.style.color = '';
+      }, success ? 1200 : 3500);
+    }
+    refreshBtn.addEventListener('click', async function() {
+      refreshBtn.innerHTML = '<span id="refreshBtnIcon">⟳</span> Syncing…';
+      refreshBtn.disabled = true;
+      startProgressBar();
+      try {
+        const response = await fetch(CLOUD_FUNCTION_URL, { method: 'POST' });
+        const result   = await response.json();
+        if (response.ok) {
+          finishProgressBar(true);
+          setTimeout(() => location.reload(), 1200);
+        } else {
+          finishProgressBar(false);
+          console.error('Sync error:', result);
+          setTimeout(() => {
+            refreshBtn.innerHTML = '<span id="refreshBtnIcon">⟳</span> Refresh';
+            refreshBtn.disabled = false;
+          }, 3500);
+        }
+      } catch (error) {
+        finishProgressBar(false);
+        console.error('Request error:', error);
+        setTimeout(() => {
+          refreshBtn.innerHTML = '<span id="refreshBtnIcon">⟳</span> Refresh';
+          refreshBtn.disabled = false;
+        }, 3500);
+      }
+    });
+  }
+  const loaders = [loadDQ(), loadWO()];
+  if (GIDS.receipts !== '000000000') loaders.push(loadRX());
+  if (GIDS.retention !== '000000000') loaders.push(loadRET());
+  if (GIDS.lfGuestCards !== '000000000') loaders.push(loadLF());
+  await Promise.all(loaders);
+  if (GIDS.retentionMonthly !== '000000000') loadRETMonthly();
+  if (GIDS.retentionHistory !== '000000000') loadRETHistory();
+})();
+</script>
+</body>
+</html>
