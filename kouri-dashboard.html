@@ -908,6 +908,7 @@ tbody td { padding: 9px 14px; color: #333; }
           <div class="chips" style="margin-left:auto">
             <div class="chip on" id="vac-vs-prop" onclick="setVacView('prop')">🏢 Property Summary</div>
             <div class="chip"   id="vac-vs-vdet" onclick="setVacView('vdet')">🔍 Vacant Detail</div>
+            <div class="chip"   id="vac-vs-cost" onclick="setVacView('cost')">💰 Turn Cost</div>
             <div class="chip"   id="vac-vs-trend" onclick="setVacView('trend')">📈 Trend</div>
           </div>
         </div>
@@ -1041,6 +1042,7 @@ const GIDS = {
   lfDeposits:       '820311706',
   lfSchedMoveIns:   '1550438509',
   lfVacancy:        '1526844573',
+  lfTurnCosts:      '000000000',  // set after first sync creates the tab
   lfVacHistory:     '000000000',  // set after first sync creates the tab
   lfInspections:    '1336164150',
 };
@@ -2337,6 +2339,7 @@ let lfSMIRows = [];   // scheduled move-ins from tickler
 let lfVacRows     = [];   // unit vacancy detail (shared with standalone vac tab)
 let lfVacHistRows = [];   // vacancy history snapshots — one row per POD per sync
 let lfInspRows    = [];   // inspection detail — 180-day rolling window
+let lfTurnCostRows = [];  // bill_detail — 90-day rolling window for unit turn costs
 let lfLoaded   = false;
 let vacLoaded  = false;
 let lfPOD = null, lfDateRange = 'cw', lfView = 'gc';
@@ -2404,6 +2407,7 @@ async function loadVac() {
       loadLFVacancy(),      // populates lfVacRows
       loadLFVacHistory(),   // populates lfVacHistRows (no-op if GID not yet set)
       loadLFInspections(),  // populates lfInspRows (no-op if GID not yet set)
+      loadLFTurnCosts(),    // populates lfTurnCostRows (no-op if GID not yet set)
       lfSMIRows.length === 0 ? loadLFSMI() : Promise.resolve(),
     ]);
     vacLoaded = true;
@@ -2425,10 +2429,10 @@ function renderVac() {
 
 function setVacView(sv) {
   vacView = sv;
-  ['prop','vdet','trend'].forEach(k => {
+  ['prop','vdet','cost','trend'].forEach(k => {
     const el = $('vac-vs-' + k); if (el) el.classList.toggle('on', k === sv);
   });
-  const titles = { prop: 'Property Summary', vdet: 'Vacant Detail', trend: 'Vacancy Trend' };
+  const titles = { prop: 'Property Summary', vdet: 'Vacant Detail', cost: 'Turn Cost', trend: 'Vacancy Trend' };
   const rt = $('vac-right-title'); if (rt) rt.textContent = titles[sv] || sv;
   renderVacDetail();
 }
@@ -2645,6 +2649,96 @@ function renderVacDetail() {
         <td style="text-align:center;color:#bbb">—</td>
       </tr>`;
     }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
+  }
+
+  if (vacView === 'cost') {
+    // Build lookup: property|normUnit → array of bill rows posted after move-out
+    const costByUnit = {};
+    const today = new Date();
+    lfTurnCostRows.forEach(b => {
+      const bd = parseDate(b.bill_date);
+      if (!bd) return;
+      const key = `${b.property}|${normUnit(b.unit)}`;
+      if (!costByUnit[key]) costByUnit[key] = [];
+      costByUnit[key].push({ ...b, _date: bd });
+    });
+
+    // Category classifiers (matching WO pattern)
+    const cIsPaint = b => /paint|repaint|touch.?up|primer/i.test(b.description + b.gl_account + b.vendor);
+    const cIsFloor = b => /floor|carpet|tile|vinyl|hardwood|laminate/i.test(b.description + b.gl_account + b.vendor);
+    const cIsClean = b => /clean|housekeep|janitorial/i.test(b.description + b.gl_account + b.vendor);
+
+    const fmtCost = v => v > 0 ? '$' + v.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0}) : '—';
+    const costCell = (v, warn) => {
+      if (!v) return `<td style="text-align:right;color:#bbb">—</td>`;
+      const col = warn && v > warn ? '#c62828' : '#2e7d32';
+      return `<td style="text-align:right;font-weight:700;color:${col}">${fmtCost(v)}</td>`;
+    };
+
+    const vacOnly2 = src.filter(r => /vacant/i.test(r.unit_status));
+    vacOnly2.sort((a, b) => (parseInt(b.days_vacant)||0) - (parseInt(a.days_vacant)||0));
+
+    colspan = 9;
+    head = `<tr>
+      <th>Property</th>
+      <th>Unit</th>
+      <th style="text-align:center">Days Vacant</th>
+      <th style="text-align:right">Total Cost</th>
+      <th style="text-align:right">Maintenance</th>
+      <th style="text-align:right">Paint</th>
+      <th style="text-align:right">Flooring</th>
+      <th style="text-align:right">Cleaning</th>
+      <th style="text-align:right">Other</th>
+    </tr>`;
+
+    const noData = GIDS.lfTurnCosts === '000000000'
+      ? 'Run a sync to populate turn cost data'
+      : lfTurnCostRows.length === 0 ? 'No turn cost data — check GID in GIDS object'
+      : 'No vacant units';
+
+    body = vacOnly2.map(r => {
+      const unitKey = `${r.property}|${normUnit(r.unit)}`;
+      const moDate  = parseDate(r.last_move_out);
+      // Filter bills to vacancy window: posted on/after move-out
+      const bills = (costByUnit[unitKey] || []).filter(b => !moDate || b._date >= moDate);
+      const total  = bills.reduce((s, b) => s + b.amount, 0);
+      const paint  = bills.filter(cIsPaint).reduce((s, b) => s + b.amount, 0);
+      const floor  = bills.filter(b => !cIsPaint(b) && cIsFloor(b)).reduce((s, b) => s + b.amount, 0);
+      const clean  = bills.filter(b => !cIsPaint(b) && !cIsFloor(b) && cIsClean(b)).reduce((s, b) => s + b.amount, 0);
+      const maint  = bills.filter(b => !cIsPaint(b) && !cIsFloor(b) && !cIsClean(b)).reduce((s, b) => s + b.amount, 0);
+      // Build tooltip of bill lines
+      const tip = bills.slice(0, 8).map(b => `${b.bill_date} ${b.vendor||b.gl_account} $${b.amount.toFixed(0)}`).join('\n')
+                + (bills.length > 8 ? `\n…+${bills.length-8} more` : '');
+      const dv = parseInt(r.days_vacant) || 0;
+      return `<tr title="${tip.replace(/"/g,'&quot;')}">
+        <td style="font-size:12px">${r.property||'—'}</td>
+        <td style="font-size:12px;color:#555">${r.unit||'—'}</td>
+        <td style="text-align:center;font-weight:700;color:${dvColor(r.days_vacant)}">${r.days_vacant||'—'}</td>
+        ${costCell(total, 3000)}
+        ${costCell(maint, 1500)}
+        ${costCell(paint, 800)}
+        ${costCell(floor, 1000)}
+        ${costCell(clean, 400)}
+        <td style="text-align:right;color:#555;font-size:12px">—</td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${noData}</td></tr>`;
+
+    // Update POD left panel to show cost totals when in cost view
+    // (reuse existing pod panel — just add a footnote)
+    const totalSpend = lfTurnCostRows.filter(b => {
+      const bd = parseDate(b.bill_date);
+      const vacUnit = lfVacRows.find(v => /vacant/i.test(v.unit_status)
+        && v.property === b.property && normUnit(v.unit) === normUnit(b.unit));
+      if (!vacUnit) return false;
+      const moDate2 = parseDate(vacUnit.last_move_out);
+      return !moDate2 || bd >= moDate2;
+    }).reduce((s, b) => s + b.amount, 0);
+    const footer = $('vac-detail-footer');
+    if (footer) footer.textContent = `${vacOnly2.length} vacant units · Total turn spend: $${totalSpend.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0})}${vacPOD ? ' · ' + vacPOD : ''}`;
+
+    $('vac-detail-head').innerHTML = head;
+    $('vac-detail-body').innerHTML = body;
+    return;
   }
 
   if (vacView === 'trend') {
@@ -3070,6 +3164,27 @@ async function loadLFInspections() {
   }));
   if (ACCESS_PODS) lfInspRows = accessFilter(lfInspRows);
   console.log('[LF INSP] Rows loaded:', lfInspRows.length);
+}
+
+async function loadLFTurnCosts() {
+  if (GIDS.lfTurnCosts === '000000000') return;  // GID not yet set — run sync first
+  const raw = await fetchGViz(GIDS.lfTurnCosts);
+  lfTurnCostRows = raw.map(r => ({
+    bill_date      : r['Bill Date']       || '',
+    property       : r['Property']        || '',
+    pod            : r['POD']             || '',
+    property_id    : r['Property ID']     || '',
+    unit           : r['Unit']            || '',
+    vendor         : r['Vendor']          || '',
+    gl_account     : r['GL Account']      || '',
+    gl_account_num : r['GL Account #']    || '',
+    amount         : parseFloat(r['Amount']) || 0,
+    description    : r['Description']     || '',
+    reference      : r['Reference']       || '',
+    payment_status : r['Payment Status']  || '',
+  })).filter(r => r.unit);
+  if (ACCESS_PODS) lfTurnCostRows = accessFilter(lfTurnCostRows);
+  console.log('[LF TURN COSTS] Rows loaded:', lfTurnCostRows.length);
 }
 
 // ── State setters ─────────────────────────────────────────────────────
@@ -3688,153 +3803,4 @@ function renderLFDetail() {
       const pal     = isSplit ? GROUP_PALETTES[depColorIdx[depKey]] : null;
       const rowStyle = pal ? `background:${pal.bg};border-left:3px solid ${pal.border}` : '';
       const badge    = pal ? `<span style="font-size:10px;background:${pal.badge};color:#fff;border-radius:3px;padding:1px 5px;margin-left:6px;vertical-align:middle;font-weight:600">partial</span>` : '';
-      return `<tr style="${rowStyle}">
-        <td>${fmtDate(r.date)}</td>
-        <td>${r.payee||'—'}${badge}</td>
-        <td style="font-size:12px;color:#555">${r.unit||'—'}</td>
-        <td>${r.property||'—'}</td>
-        <td>${r.reference||'—'}</td>
-        <td style="text-align:center;font-size:12px;color:#1565c0">${appDateStr}</td>
-        <td style="text-align:center;font-size:12px;color:#2e7d32;font-weight:600">${miStr}</td>
-        <td style="text-align:right;color:#1565c0;font-weight:600">${fmtAmt(r.amount)}</td>
-      </tr>`;
-    }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
-
-  }
-
-  $('lf-detail-head').innerHTML = head;
-  $('lf-detail-body').innerHTML = body;
-  $('lf-detail-footer').textContent = src.length + ' record' + (src.length!==1?'s':'') + (lfPOD ? ' · ' + lfPOD : '');
-}
-
-// ─── INIT ─────────────────────────────────────────────────────────────
-(async () => {
-  applyAccessControl(); // enforce Cloudflare Access POD restrictions before anything loads
-  $('lastUpdated').textContent = 'Refreshed ' + new Date().toLocaleString('en-US',
-    { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
-  // Refresh button functionality
-  const CLOUD_FUNCTION_URL = 'https://us-central1-appfolio-dashboard-491122.cloudfunctions.net/sync_appfolio_data';
-  const refreshBtn = document.getElementById('refreshBtn');
-  if (refreshBtn) {
-    // Sync progress simulation — 13 steps with estimated durations (seconds)
-    const SYNC_STEPS = [
-      { label: 'Step 1/13 · Delinquency report',    dur: 6  },
-      { label: 'Step 2/13 · Work orders',            dur: 5  },
-      { label: 'Step 3/13 · Rent roll',              dur: 7  },
-      { label: 'Step 4/13 · Move ins / move outs',   dur: 5  },
-      { label: 'Step 5/13 · Renewals',               dur: 4  },
-      { label: 'Step 6/13 · Occupancy metrics',      dur: 5  },
-      { label: 'Step 7/13 · Leasing agents',         dur: 4  },
-      { label: 'Step 8/13 · Retention',              dur: 6  },
-      { label: 'Step 9/13 · Retention monthly',      dur: 5  },
-      { label: 'Step 10/13 · Guest cards',           dur: 7  },
-      { label: 'Step 11/13 · Showings',              dur: 5  },
-      { label: 'Step 12/13 · Applications',          dur: 6  },
-      { label: 'Step 13/13 · Security deposits GL',  dur: 5  },
-    ];
-    const TOTAL_DUR = SYNC_STEPS.reduce((s, x) => s + x.dur, 0);  // ~75s
-
-    let syncTimers = [];
-    function clearSyncTimers() { syncTimers.forEach(clearTimeout); syncTimers = []; }
-
-    function startProgressBar() {
-      const bar   = $('sync-bar-fill');
-      const label = $('sync-step-label');
-      const pct   = $('sync-pct-label');
-      const prog  = $('sync-progress');
-
-      bar.className = '';
-      bar.style.width = '0%';
-      label.textContent = 'Connecting to AppFolio…';
-      pct.textContent = '0%';
-      prog.classList.add('visible');
-
-      // Walk through steps, capping at 90% until real response arrives
-      let elapsed = 0;
-      SYNC_STEPS.forEach((step, i) => {
-        // Capture loop values NOW — closures see the final value of `elapsed` otherwise
-        const delay    = elapsed * 1000;
-        const progress = Math.min(((elapsed + step.dur) / TOTAL_DUR) * 90, 90);
-        const label_text = step.label;
-        const t = setTimeout(() => {
-          bar.style.width = progress.toFixed(1) + '%';
-          label.textContent = label_text;
-          pct.textContent = Math.round(progress) + '%';
-        }, delay);
-        syncTimers.push(t);
-        elapsed += step.dur;
-      });
-    }
-
-    function finishProgressBar(success) {
-      clearSyncTimers();
-      const bar   = $('sync-bar-fill');
-      const label = $('sync-step-label');
-      const pct   = $('sync-pct-label');
-      const prog  = $('sync-progress');
-
-      bar.style.width = '100%';
-      bar.className = success ? 'done' : 'error';
-      pct.style.color = success ? '#7eeec4' : '#ef9a9a';
-      pct.textContent = '100%';
-      label.textContent = success ? '✓ Sync complete — reloading…' : '✕ Sync failed';
-
-      setTimeout(() => {
-        prog.classList.remove('visible');
-        bar.style.width = '0%';
-        bar.className = '';
-        pct.style.color = '';
-      }, success ? 1200 : 3500);
-    }
-
-    refreshBtn.addEventListener('click', async function() {
-      refreshBtn.innerHTML = '<span id="refreshBtnIcon">⟳</span> Syncing…';
-      refreshBtn.disabled = true;
-      startProgressBar();
-      try {
-        const response = await fetch(CLOUD_FUNCTION_URL, { method: 'POST' });
-        const result   = await response.json();
-        if (response.ok) {
-          finishProgressBar(true);
-          setTimeout(() => location.reload(), 1200);
-        } else {
-          finishProgressBar(false);
-          console.error('Sync error:', result);
-          setTimeout(() => {
-            refreshBtn.innerHTML = '<span id="refreshBtnIcon">⟳</span> Refresh';
-            refreshBtn.disabled = false;
-          }, 3500);
-        }
-      } catch (error) {
-        finishProgressBar(false);
-        console.error('Request error:', error);
-        setTimeout(() => {
-          refreshBtn.innerHTML = '<span id="refreshBtnIcon">⟳</span> Refresh';
-         
-          refreshBtn.disabled = false;
-        }, 3500);
-      }
-    });
-  }
-  const loaders = [loadDQ(), loadWO()];
-  if (GIDS.receipts !== '000000000') {
-    loaders.push(loadRX());
-  }
-  if (GIDS.retention !== '000000000') {
-    loaders.push(loadRET());
-  }
-  if (GIDS.lfGuestCards !== '000000000') {
-    loaders.push(loadLF());
-  }
-  await Promise.all(loaders);
-  // Load monthly data after main tabs (non-blocking)
-  if (GIDS.retentionMonthly !== '000000000') {
-    loadRETMonthly();
-  }
-  if (GIDS.retentionHistory !== '000000000') {
-    loadRETHistory();
-  }
-})();
-</script>
-</body>
-</html>
+      return `<tr style="${ro
