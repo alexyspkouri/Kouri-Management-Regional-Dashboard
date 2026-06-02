@@ -1042,7 +1042,7 @@ const GIDS = {
   lfDeposits:       '820311706',
   lfSchedMoveIns:   '1550438509',
   lfVacancy:        '1526844573',
-  lfTurnCosts:      '000000000',  // set after first sync creates the tab
+  lfTurnCosts:      '1020766965',
   lfVacHistory:     '000000000',  // set after first sync creates the tab
   lfInspections:    '1336164150',
 };
@@ -2652,87 +2652,131 @@ function renderVacDetail() {
   }
 
   if (vacView === 'cost') {
-    // Build lookup: property|normUnit → array of bill rows posted after move-out
-    const costByUnit = {};
-    const today = new Date();
-    lfTurnCostRows.forEach(b => {
-      const bd = parseDate(b.bill_date);
-      if (!bd) return;
-      const key = `${b.property}|${normUnit(b.unit)}`;
-      if (!costByUnit[key]) costByUnit[key] = [];
-      costByUnit[key].push({ ...b, _date: bd });
-    });
-
-    // Category classifiers (matching WO pattern)
-    const cIsPaint = b => /paint|repaint|touch.?up|primer/i.test(b.description + b.gl_account + b.vendor);
-    const cIsFloor = b => /floor|carpet|tile|vinyl|hardwood|laminate/i.test(b.description + b.gl_account + b.vendor);
-    const cIsClean = b => /clean|housekeep|janitorial/i.test(b.description + b.gl_account + b.vendor);
-
     const fmtCost = v => v > 0 ? '$' + v.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0}) : '—';
     const costCell = (v, warn) => {
       if (!v) return `<td style="text-align:right;color:#bbb">—</td>`;
-      const col = warn && v > warn ? '#c62828' : '#2e7d32';
+      const col = warn && v > warn ? '#c62828' : '#333';
       return `<td style="text-align:right;font-weight:700;color:${col}">${fmtCost(v)}</td>`;
+    };
+
+    // ── Category classifiers — check description + GL account name + vendor name ──
+    // Priority order: Paint → Flooring → Cleaning → Inspection → Appliances → Maintenance → Other
+    const haystack = b => `${b.description||''} ${b.gl_account||''} ${b.vendor||''}`.toLowerCase();
+    const cIsPaint    = b => /paint|repaint|touch.?up|primer|drywall|patch|texture/i.test(haystack(b));
+    const cIsFloor    = b => /floor|carpet|tile|vinyl|hardwood|laminate|lvp|lvt|subfloor|rug/i.test(haystack(b));
+    const cIsClean    = b => /clean|housekeep|janitorial|deep clean|move.?out|turnover clean|saniti/i.test(haystack(b));
+    const cIsInspect  = b => /inspect|punch.?list|assessment|walk.?through|make.?ready check/i.test(haystack(b));
+    const cIsApplianc = b => /appliance|stove|oven|fridge|refrigerator|dishwasher|washer|dryer|hvac|furnace|water heat/i.test(haystack(b));
+    const categorize  = b => {
+      if (cIsPaint(b))    return 'paint';
+      if (cIsFloor(b))    return 'floor';
+      if (cIsClean(b))    return 'clean';
+      if (cIsInspect(b))  return 'inspect';
+      if (cIsApplianc(b)) return 'appliance';
+      return 'maint';
+    };
+
+    // ── Build bill lookup — match by normUnit(unit) within same property ──
+    // Also try fuzzy property match: bill property contains or is contained by vac property
+    const propMatch = (bp, vp) => {
+      if (!bp || !vp) return false;
+      const b = bp.toLowerCase(), v = vp.toLowerCase();
+      return b === v || b.includes(v.slice(0, 30)) || v.includes(b.slice(0, 30));
+    };
+
+    // Index bills by normUnit alone (for cases where property names differ slightly)
+    const billsByUnit = {};   // normUnit → [bill, ...]
+    const billsByKey  = {};   // property|normUnit → [bill, ...]
+    lfTurnCostRows.forEach(b => {
+      if (!b.unit) return;
+      const bd = parseDate(b.bill_date);
+      if (!bd) return;
+      const nu = normUnit(b.unit);
+      const key = `${b.property}|${nu}`;
+      if (!billsByKey[key])  billsByKey[key]  = [];
+      if (!billsByUnit[nu])  billsByUnit[nu]  = [];
+      const rec = { ...b, _date: bd, _cat: categorize(b) };
+      billsByKey[key].push(rec);
+      billsByUnit[nu].push(rec);
+    });
+
+    // For a given vacant unit row, find matching bills
+    const getBills = (r, moDate, miDate) => {
+      const nu  = normUnit(r.unit);
+      const key = `${r.property}|${nu}`;
+      // Exact key match first, then fuzzy property match via unit-only index
+      let candidates = billsByKey[key] || [];
+      if (!candidates.length && billsByUnit[nu]) {
+        candidates = billsByUnit[nu].filter(b => propMatch(b.property, r.property));
+      }
+      // Filter to vacancy window: bill date >= move-out (or within 7 days before, to catch day-of bills)
+      const windowStart = moDate ? new Date(moDate.getTime() - 7*864e5) : null;
+      return candidates.filter(b => {
+        if (windowStart && b._date < windowStart) return false;  // too old
+        if (miDate && b._date > miDate) return false;            // after move-in
+        return true;
+      });
     };
 
     const vacOnly2 = src.filter(r => /vacant/i.test(r.unit_status));
     vacOnly2.sort((a, b) => (parseInt(b.days_vacant)||0) - (parseInt(a.days_vacant)||0));
+
+    // Build scheduled move-in lookup for cost view
+    const costMiLookup = {};
+    lfSMIRows.filter(r => r.property && r.unit && r.move_in).forEach(r => {
+      const key = `${r.property}|${normUnit(r.unit)}`;
+      const mi = parseDate(r.move_in);
+      if (mi && (!costMiLookup[key] || mi > costMiLookup[key])) costMiLookup[key] = mi;
+    });
 
     colspan = 9;
     head = `<tr>
       <th>Property</th>
       <th>Unit</th>
       <th style="text-align:center">Days Vacant</th>
-      <th style="text-align:right">Total Cost</th>
-      <th style="text-align:right">Maintenance</th>
-      <th style="text-align:right">Paint</th>
-      <th style="text-align:right">Flooring</th>
-      <th style="text-align:right">Cleaning</th>
-      <th style="text-align:right">Other</th>
+      <th style="text-align:right">Total</th>
+      <th style="text-align:right" title="Maintenance, repair, punch list">Maint</th>
+      <th style="text-align:right" title="Paint, drywall, primer">Paint</th>
+      <th style="text-align:right" title="Carpet, flooring, tile">Floor</th>
+      <th style="text-align:right" title="Cleaning, housekeeping">Clean</th>
+      <th style="text-align:right" title="Appliances, HVAC + inspections">Other</th>
     </tr>`;
 
-    const noData = GIDS.lfTurnCosts === '000000000'
-      ? 'Run a sync to populate turn cost data'
-      : lfTurnCostRows.length === 0 ? 'No turn cost data — check GID in GIDS object'
+    const noData = lfTurnCostRows.length === 0
+      ? 'No turn cost data yet — run a sync'
       : 'No vacant units';
 
     body = vacOnly2.map(r => {
-      const unitKey = `${r.property}|${normUnit(r.unit)}`;
       const moDate  = parseDate(r.last_move_out);
-      // Filter bills to vacancy window: posted on/after move-out
-      const bills = (costByUnit[unitKey] || []).filter(b => !moDate || b._date >= moDate);
-      const total  = bills.reduce((s, b) => s + b.amount, 0);
-      const paint  = bills.filter(cIsPaint).reduce((s, b) => s + b.amount, 0);
-      const floor  = bills.filter(b => !cIsPaint(b) && cIsFloor(b)).reduce((s, b) => s + b.amount, 0);
-      const clean  = bills.filter(b => !cIsPaint(b) && !cIsFloor(b) && cIsClean(b)).reduce((s, b) => s + b.amount, 0);
-      const maint  = bills.filter(b => !cIsPaint(b) && !cIsFloor(b) && !cIsClean(b)).reduce((s, b) => s + b.amount, 0);
-      // Build tooltip of bill lines
-      const tip = bills.slice(0, 8).map(b => `${b.bill_date} ${b.vendor||b.gl_account} $${b.amount.toFixed(0)}`).join('\n')
-                + (bills.length > 8 ? `\n…+${bills.length-8} more` : '');
-      const dv = parseInt(r.days_vacant) || 0;
+      const miDate  = costMiLookup[`${r.property}|${normUnit(r.unit)}`] || null;
+      const bills   = getBills(r, moDate, miDate);
+      const sum     = cat => bills.filter(b => b._cat === cat).reduce((s, b) => s + b.amount, 0);
+      const total   = bills.reduce((s, b) => s + b.amount, 0);
+      const maint   = sum('maint');
+      const paint   = sum('paint');
+      const floor   = sum('floor');
+      const clean   = sum('clean');
+      const other   = sum('inspect') + sum('appliance');
+      // Tooltip: list each bill line
+      const tip = bills.slice(0, 10).map(b =>
+        `[${b._cat}] ${b.bill_date ? b.bill_date.slice(0,10) : ''} ${b.vendor||b.gl_account||''} — ${b.description ? b.description.slice(0,40) : ''} ($${b.amount.toFixed(0)})`
+      ).join('\n') + (bills.length > 10 ? `\n…+${bills.length-10} more` : '');
+      const noBills = bills.length === 0;
       return `<tr title="${tip.replace(/"/g,'&quot;')}">
         <td style="font-size:12px">${r.property||'—'}</td>
         <td style="font-size:12px;color:#555">${r.unit||'—'}</td>
         <td style="text-align:center;font-weight:700;color:${dvColor(r.days_vacant)}">${r.days_vacant||'—'}</td>
-        ${costCell(total, 3000)}
-        ${costCell(maint, 1500)}
-        ${costCell(paint, 800)}
-        ${costCell(floor, 1000)}
-        ${costCell(clean, 400)}
-        <td style="text-align:right;color:#555;font-size:12px">—</td>
+        ${noBills ? `<td style="text-align:right;color:#bbb;font-size:11px" colspan="6">no bills found</td>` :
+          `${costCell(total, 4000)}${costCell(maint, 2000)}${costCell(paint, 1000)}${costCell(floor, 1200)}${costCell(clean, 500)}${costCell(other, 1000)}`}
       </tr>`;
     }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${noData}</td></tr>`;
 
-    // Update POD left panel to show cost totals when in cost view
-    // (reuse existing pod panel — just add a footnote)
-    const totalSpend = lfTurnCostRows.filter(b => {
-      const bd = parseDate(b.bill_date);
-      const vacUnit = lfVacRows.find(v => /vacant/i.test(v.unit_status)
-        && v.property === b.property && normUnit(v.unit) === normUnit(b.unit));
-      if (!vacUnit) return false;
-      const moDate2 = parseDate(vacUnit.last_move_out);
-      return !moDate2 || bd >= moDate2;
-    }).reduce((s, b) => s + b.amount, 0);
+    // Footer: total spend across all visible vacant units
+    const totalSpend = vacOnly2.reduce((s, r) => {
+      const moDate = parseDate(r.last_move_out);
+      const miDate = costMiLookup[`${r.property}|${normUnit(r.unit)}`] || null;
+      return s + getBills(r, moDate, miDate).reduce((ss, b) => ss + b.amount, 0);
+    }, 0);
     const footer = $('vac-detail-footer');
     if (footer) footer.textContent = `${vacOnly2.length} vacant units · Total turn spend: $${totalSpend.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0})}${vacPOD ? ' · ' + vacPOD : ''}`;
 
