@@ -185,7 +185,7 @@ body {
 }
 .tab-btn.active .tab-badge { background: #006140; color: white; }
 /* ─── Content ─── */
-.content { padding: 22px 28px; max-width: 1700px; margin: 0 auto; }
+.content { padding: 22px 28px; }
 /* ─── Cards ─── */
 .cards {
   display: grid;
@@ -223,7 +223,7 @@ body {
 /* ─── Two-panel layout ─── */
 .panels {
   display: grid;
-  grid-template-columns: 700px 1fr;
+  grid-template-columns: minmax(280px, 32%) 1fr;
   gap: 18px;
   align-items: start;
 }
@@ -302,8 +302,8 @@ body {
 .chip.on.orange { background: #e65100; border-color: #e65100; }
 .chip.on.amber  { background: #f57f17; border-color: #f57f17; }
 /* ─── Tables ─── */
-.tbl-wrap { overflow-x: auto; overflow-y: auto; max-height: 480px; }
-.pod-tbl-wrap { overflow-x: auto; overflow-y: auto; max-height: 540px; }
+.tbl-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 280px); }
+.pod-tbl-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 240px); }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 thead th {
   background: #f7f8fa;
