@@ -2746,29 +2746,50 @@ function renderVacDetail() {
       ? 'No turn cost data yet — run a sync'
       : 'No vacant units';
 
-    body = vacOnly2.map(r => {
+    // Store bills per unit so the drill-down handler can access them
+    window._costDrillData = {};
+
+    body = vacOnly2.map((r, ri) => {
       const moDate  = parseDate(r.last_move_out);
       const miDate  = costMiLookup[`${r.property}|${normUnit(r.unit)}`] || null;
       const bills   = getBills(r, moDate, miDate);
-      const sum     = cat => bills.filter(b => b._cat === cat).reduce((s, b) => s + b.amount, 0);
-      const total   = bills.reduce((s, b) => s + b.amount, 0);
-      const maint   = sum('maint');
-      const paint   = sum('paint');
-      const floor   = sum('floor');
-      const clean   = sum('clean');
-      const other   = sum('inspect') + sum('appliance');
-      // Tooltip: list each bill line
-      const tip = bills.slice(0, 10).map(b =>
-        `[${b._cat}] ${b.bill_date ? b.bill_date.slice(0,10) : ''} ${b.vendor||b.gl_account||''} — ${b.description ? b.description.slice(0,40) : ''} ($${b.amount.toFixed(0)})`
-      ).join('\n') + (bills.length > 10 ? `\n…+${bills.length-10} more` : '');
+      const drillId = `cd_${ri}`;
+      window._costDrillData[drillId] = bills;
+
+      const sum   = cat => bills.filter(b => b._cat === cat).reduce((s, b) => s + b.amount, 0);
+      const total = bills.reduce((s, b) => s + b.amount, 0);
+      const maint = sum('maint');
+      const paint = sum('paint');
+      const floor = sum('floor');
+      const clean = sum('clean');
+      const other = sum('inspect') + sum('appliance');
       const noBills = bills.length === 0;
-      return `<tr title="${tip.replace(/"/g,'&quot;')}">
+
+      // Clickable cost cell — highlights and toggles drill-down for that category
+      const drillCell = (v, warn, cat) => {
+        if (!v) return `<td style="text-align:right;color:#bbb">—</td>`;
+        const col = warn && v > warn ? '#c62828' : '#1565c0';
+        return `<td style="text-align:right;font-weight:700;color:${col};cursor:pointer;text-decoration:underline dotted"
+          onclick="toggleCostDrill('${drillId}','${cat}')">${fmtCost(v)}</td>`;
+      };
+
+      const unitRow = `<tr id="crow_${drillId}">
         <td style="font-size:12px">${r.property||'—'}</td>
         <td style="font-size:12px;color:#555">${r.unit||'—'}</td>
         <td style="text-align:center;font-weight:700;color:${dvColor(r.days_vacant)}">${r.days_vacant||'—'}</td>
-        ${noBills ? `<td style="text-align:right;color:#bbb;font-size:11px" colspan="6">no bills found</td>` :
-          `${costCell(total, 4000)}${costCell(maint, 2000)}${costCell(paint, 1000)}${costCell(floor, 1200)}${costCell(clean, 500)}${costCell(other, 1000)}`}
+        ${noBills
+          ? `<td style="text-align:right;color:#bbb;font-size:11px" colspan="6">no bills found</td>`
+          : `${drillCell(total, 4000, 'all')}${drillCell(maint, 2000, 'maint')}${drillCell(paint, 1000, 'paint')}${drillCell(floor, 1200, 'floor')}${drillCell(clean, 500, 'clean')}${drillCell(other, 1000, 'other')}`}
       </tr>`;
+
+      // Hidden drill-down row (expands below the unit row)
+      const drillRow = `<tr id="drill_${drillId}" style="display:none;background:#f8fbff">
+        <td colspan="9" style="padding:0;border-bottom:2px solid #1565c0">
+          <div id="drillcontent_${drillId}" style="padding:10px 18px 14px"></div>
+        </td>
+      </tr>`;
+
+      return unitRow + drillRow;
     }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${noData}</td></tr>`;
 
     // Footer: total spend across all visible vacant units
@@ -2797,6 +2818,72 @@ function renderVacDetail() {
   $('vac-detail-body').innerHTML = body;
   const recLabel = vacView === 'vdet' ? 'unit' : 'property';
   $('vac-detail-footer').textContent = (vacView === 'prop' ? vacAggByProperty(src).length : src.filter(r => /vacant/i.test(r.unit_status)).length) + ' ' + recLabel + (vacPOD ? ' · ' + vacPOD : '');
+}
+
+function toggleCostDrill(drillId, cat) {
+  const drillRow = $('drill_' + drillId);
+  const content  = $('drillcontent_' + drillId);
+  if (!drillRow || !content) return;
+
+  // If already open for this category, close it
+  if (drillRow.style.display !== 'none' && drillRow.dataset.openCat === cat) {
+    drillRow.style.display = 'none';
+    drillRow.dataset.openCat = '';
+    return;
+  }
+
+  const allBills = (window._costDrillData || {})[drillId] || [];
+  const filtered = cat === 'all' ? allBills : allBills.filter(b => {
+    if (cat === 'other') return b._cat === 'inspect' || b._cat === 'appliance';
+    return b._cat === cat;
+  });
+
+  filtered.sort((a, b) => (b._date ? b._date.getTime() : 0) - (a._date ? a._date.getTime() : 0));
+
+  const catLabel = { all:'All Bills', maint:'Maintenance', paint:'Paint / Drywall',
+                     floor:'Flooring', clean:'Cleaning', other:'Appliances & Inspections' };
+  const fmtD = d => d ? d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
+  const fmtA = v => '$' + Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+  const rows = filtered.map(b => `<tr style="border-bottom:1px solid #e8f0fe">
+    <td style="font-size:11px;color:#555;white-space:nowrap">${fmtD(b._date)}</td>
+    <td style="font-size:11px;font-weight:600">${b.vendor||'—'}</td>
+    <td style="font-size:11px;color:#555">${b.gl_account||'—'}</td>
+    <td style="font-size:11px;color:#444;max-width:260px">${b.description||'—'}</td>
+    <td style="font-size:11px;color:#555;white-space:nowrap">${b.payment_status||'—'}</td>
+    <td style="font-size:12px;font-weight:700;text-align:right;color:#1565c0">${fmtA(b.amount)}</td>
+  </tr>`).join('');
+
+  const total = filtered.reduce((s, b) => s + b.amount, 0);
+
+  content.innerHTML = `
+    <div style="font-size:11px;font-weight:700;color:#1565c0;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px">
+      ${catLabel[cat] || cat} — ${filtered.length} bill${filtered.length!==1?'s':''}
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="background:#e8f0fe">
+          <th style="padding:5px 10px;text-align:left;font-size:10px;color:#555;text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap">Date</th>
+          <th style="padding:5px 10px;text-align:left;font-size:10px;color:#555;text-transform:uppercase;letter-spacing:0.5px">Vendor</th>
+          <th style="padding:5px 10px;text-align:left;font-size:10px;color:#555;text-transform:uppercase;letter-spacing:0.5px">GL Account</th>
+          <th style="padding:5px 10px;text-align:left;font-size:10px;color:#555;text-transform:uppercase;letter-spacing:0.5px">Description</th>
+          <th style="padding:5px 10px;text-align:left;font-size:10px;color:#555;text-transform:uppercase;letter-spacing:0.5px">Status</th>
+          <th style="padding:5px 10px;text-align:right;font-size:10px;color:#555;text-transform:uppercase;letter-spacing:0.5px">Amount</th>
+        </tr>
+      </thead>
+      <tbody style="background:white">${rows || '<tr><td colspan="6" style="padding:12px;text-align:center;color:#aaa">No bills in this category</td></tr>'}</tbody>
+      <tfoot>
+        <tr style="background:#e8f0fe;font-weight:700">
+          <td colspan="5" style="padding:6px 10px;font-size:11px;color:#555">Total</td>
+          <td style="padding:6px 10px;text-align:right;color:#1565c0">${fmtA(total)}</td>
+        </tr>
+      </tfoot>
+    </table>`;
+
+  drillRow.dataset.openCat = cat;
+  drillRow.style.display = '';
+  // Scroll the drill row into view
+  drillRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function renderVacTrend() {
