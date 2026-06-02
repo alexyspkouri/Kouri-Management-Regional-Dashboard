@@ -2821,6 +2821,20 @@ function renderVacDetail() {
   $('vac-detail-footer').textContent = (vacView === 'prop' ? vacAggByProperty(src).length : src.filter(r => /vacant/i.test(r.unit_status)).length) + ' ' + recLabel + (vacPOD ? ' · ' + vacPOD : '');
 }
 
+let _openCostDrill = null;  // tracks the currently open drillId
+
+function closeCostDrill(id) {
+  if (!id) return;
+  const dr = $('drill_' + id);
+  const ur = $('crow_'  + id);
+  if (dr) { dr.style.display = 'none'; dr.dataset.openCat = ''; }
+  if (ur) ur.style.background = '';
+  ['all','maint','paint','floor','clean','other'].forEach(c => {
+    const cel = $(`cell_${id}_${c}`);
+    if (cel) { cel.style.background = ''; cel.style.color = ''; cel.style.borderRadius = ''; }
+  });
+}
+
 function toggleCostDrill(drillId, cat) {
   const drillRow  = $('drill_'  + drillId);
   const unitRow   = $('crow_'   + drillId);
@@ -2829,25 +2843,17 @@ function toggleCostDrill(drillId, cat) {
 
   const prevCat = drillRow.dataset.openCat;
 
-  // Clear any previously highlighted cell on THIS row
-  const clearHighlight = () => {
-    ['all','maint','paint','floor','clean','other'].forEach(c => {
-      const cel = $(`cell_${drillId}_${c}`);
-      if (cel) { cel.style.background = ''; cel.style.color = ''; cel.style.borderRadius = ''; }
-    });
-    if (unitRow) unitRow.style.background = '';
-  };
-
   // If already open for this exact category, close it
   if (drillRow.style.display !== 'none' && prevCat === cat) {
-    drillRow.style.display = 'none';
-    drillRow.dataset.openCat = '';
-    clearHighlight();
+    closeCostDrill(drillId);
+    _openCostDrill = null;
     return;
   }
 
-  // Switching category or opening fresh — clear old highlight first
-  clearHighlight();
+  // Close whatever was open before (different row or different category)
+  if (_openCostDrill && _openCostDrill !== drillId) closeCostDrill(_openCostDrill);
+  // Also clear highlight on this row if switching category
+  closeCostDrill(drillId);
 
   const allBills = (window._costDrillData || {})[drillId] || [];
   const filtered = cat === 'all' ? allBills : allBills.filter(b => {
@@ -2899,15 +2905,16 @@ function toggleCostDrill(drillId, cat) {
 
   drillRow.dataset.openCat = cat;
   drillRow.style.display = '';
+  _openCostDrill = drillId;
 
-  // Highlight the parent row so it's easy to find
+  // Highlight the parent row
   if (unitRow) unitRow.style.background = '#dbeafe';
 
   // Highlight ONLY the clicked cell
   const activeCell = $(`cell_${drillId}_${cat}`);
   if (activeCell) {
-    activeCell.style.background = '#1565c0';
-    activeCell.style.color      = '#fff';
+    activeCell.style.background   = '#1565c0';
+    activeCell.style.color        = '#fff';
     activeCell.style.borderRadius = '4px';
   }
 
