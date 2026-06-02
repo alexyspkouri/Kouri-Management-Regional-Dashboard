@@ -2765,11 +2765,12 @@ function renderVacDetail() {
       const other = sum('inspect') + sum('appliance');
       const noBills = bills.length === 0;
 
-      // Clickable cost cell — highlights and toggles drill-down for that category
+      // Clickable cost cell — each gets a stable id so toggleCostDrill can highlight just the clicked one
       const drillCell = (v, warn, cat) => {
         if (!v) return `<td style="text-align:right;color:#bbb">—</td>`;
         const col = warn && v > warn ? '#c62828' : '#1565c0';
-        return `<td style="text-align:right;font-weight:700;color:${col};cursor:pointer;text-decoration:underline dotted"
+        return `<td id="cell_${drillId}_${cat}"
+          style="text-align:right;font-weight:700;color:${col};cursor:pointer;text-decoration:underline dotted;border-radius:4px;transition:background 0.15s"
           onclick="toggleCostDrill('${drillId}','${cat}')">${fmtCost(v)}</td>`;
       };
 
@@ -2821,16 +2822,32 @@ function renderVacDetail() {
 }
 
 function toggleCostDrill(drillId, cat) {
-  const drillRow = $('drill_' + drillId);
-  const content  = $('drillcontent_' + drillId);
+  const drillRow  = $('drill_'  + drillId);
+  const unitRow   = $('crow_'   + drillId);
+  const content   = $('drillcontent_' + drillId);
   if (!drillRow || !content) return;
 
-  // If already open for this category, close it
-  if (drillRow.style.display !== 'none' && drillRow.dataset.openCat === cat) {
+  const prevCat = drillRow.dataset.openCat;
+
+  // Clear any previously highlighted cell on THIS row
+  const clearHighlight = () => {
+    ['all','maint','paint','floor','clean','other'].forEach(c => {
+      const cel = $(`cell_${drillId}_${c}`);
+      if (cel) { cel.style.background = ''; cel.style.color = ''; cel.style.borderRadius = ''; }
+    });
+    if (unitRow) unitRow.style.background = '';
+  };
+
+  // If already open for this exact category, close it
+  if (drillRow.style.display !== 'none' && prevCat === cat) {
     drillRow.style.display = 'none';
     drillRow.dataset.openCat = '';
+    clearHighlight();
     return;
   }
+
+  // Switching category or opening fresh — clear old highlight first
+  clearHighlight();
 
   const allBills = (window._costDrillData || {})[drillId] || [];
   const filtered = cat === 'all' ? allBills : allBills.filter(b => {
@@ -2882,7 +2899,18 @@ function toggleCostDrill(drillId, cat) {
 
   drillRow.dataset.openCat = cat;
   drillRow.style.display = '';
-  // Scroll the drill row into view
+
+  // Highlight the parent row so it's easy to find
+  if (unitRow) unitRow.style.background = '#dbeafe';
+
+  // Highlight ONLY the clicked cell
+  const activeCell = $(`cell_${drillId}_${cat}`);
+  if (activeCell) {
+    activeCell.style.background = '#1565c0';
+    activeCell.style.color      = '#fff';
+    activeCell.style.borderRadius = '4px';
+  }
+
   drillRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
