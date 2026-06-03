@@ -302,17 +302,17 @@ body {
 .chip.on.orange { background: #e65100; border-color: #e65100; }
 .chip.on.amber  { background: #f57f17; border-color: #f57f17; }
 /* ─── Tables ─── */
-.tbl-wrap { overflow-x: hidden; overflow-y: auto; max-height: calc(100vh - 280px); }
-.pod-tbl-wrap { overflow-x: hidden; overflow-y: auto; max-height: calc(100vh - 240px); }
+.tbl-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 280px); }
+.pod-tbl-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 240px); }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 thead th {
   background: #f7f8fa;
-  padding: 7px 10px;
+  padding: 6px 8px;
   text-align: left;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.4px;
   color: #888;
   border-bottom: 2px solid #ebebeb;
   cursor: pointer;
@@ -334,7 +334,7 @@ tbody tr.selected { background: #e6f4ed !important; }
 tbody tr.selected td { font-weight: 500; }
 tbody tr.active-row { background: #e0f2e9 !important; box-shadow: inset 4px 0 0 #006140; }
 tbody tr.active-row td { font-weight: 700 !important; }
-tbody td { padding: 7px 10px; color: #333; }
+tbody td { padding: 6px 8px; color: #333; font-size: 12px; }
 /* ─── Badges ─── */
 .badge {
   display: inline-block;
@@ -2743,9 +2743,6 @@ function renderVacDetail() {
       });
     };
 
-    const vacOnly2 = src.filter(r => /vacant/i.test(r.unit_status));
-    vacOnly2.sort((a, b) => (parseInt(b.days_vacant)||0) - (parseInt(a.days_vacant)||0));
-
     // Build scheduled move-in lookup for cost view
     const costMiLookup = {};
     lfSMIRows.filter(r => r.property && r.unit && r.move_in).forEach(r => {
@@ -2754,128 +2751,88 @@ function renderVacDetail() {
       if (mi && (!costMiLookup[key] || mi > costMiLookup[key])) costMiLookup[key] = mi;
     });
 
-    // Apply sort to cost view
-    const cSortFn = {
-      property: r => r.property, unit: r => r.unit,
-      days_vacant: r => parseInt(r.days_vacant)||0,
-    }[vacSort.col];
-    if (cSortFn) {
-      vacOnly2.sort((a, b) => {
-        const av = cSortFn(a), bv = cSortFn(b);
-        return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * vacSort.dir;
-      });
-    }
-    // Cost-specific sort (total, maint, etc.) applied after bills are computed — handled per-row below via _billTotals
-    window._costSortTotals = {};
+    // ── Step 1: compute totals for every vacant unit first, THEN sort ──
+    const vacOnly2 = src.filter(r => /vacant/i.test(r.unit_status)).map(r => {
+      const moDate = parseDate(r.last_move_out);
+      const miDate = costMiLookup[`${r.property}|${normUnit(r.unit)}`] || null;
+      const bills  = getBills(r, moDate, miDate);
+      const sum    = cat => bills.filter(b => b._cat === cat).reduce((s, b) => s + b.amount, 0);
+      return {
+        r, bills,
+        total: bills.reduce((s, b) => s + b.amount, 0),
+        maint: sum('maint'), paint: sum('paint'), floor: sum('floor'),
+        clean: sum('clean'), other: sum('inspect') + sum('appliance'),
+      };
+    });
+
+    // ── Step 2: sort by whichever column was clicked ──
+    const costSortMap = {
+      property:   x => (x.r.property||'').toLowerCase(),
+      unit:       x => (x.r.unit||'').toLowerCase(),
+      days_vacant:x => parseInt(x.r.days_vacant)||0,
+      cost_total: x => x.total,
+      cost_maint: x => x.maint,
+      cost_paint: x => x.paint,
+      cost_floor: x => x.floor,
+      cost_clean: x => x.clean,
+      cost_other: x => x.other,
+    };
+    const cSortFn = costSortMap[vacSort.col] || (x => parseInt(x.r.days_vacant)||0);
+    const cSortDir = (vacSort.col && costSortMap[vacSort.col]) ? vacSort.dir : -1;
+    vacOnly2.sort((a, b) => {
+      const av = cSortFn(a), bv = cSortFn(b);
+      return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * cSortDir;
+    });
 
     colspan = 9;
-    head = `<tr>
-      ${vacTh('Property','property',null)}
-      ${vacTh('Unit','unit',null)}
-      ${vacTh('Days Vacant','days_vacant','center')}
-      ${vacTh('Total','cost_total','right')}
-      ${vacTh('Maint','cost_maint','right')}
-      ${vacTh('Paint','cost_paint','right')}
-      ${vacTh('Floor','cost_floor','right')}
-      ${vacTh('Clean','cost_clean','right')}
-      ${vacTh('Other','cost_other','right')}
-    </tr>`;
+    head = '<tr>' +
+      vacTh('Property','property',null) +
+      vacTh('Unit','unit',null) +
+      vacTh('Days Vacant','days_vacant','center') +
+      vacTh('Total','cost_total','right') +
+      vacTh('Maint','cost_maint','right') +
+      vacTh('Paint','cost_paint','right') +
+      vacTh('Floor','cost_floor','right') +
+      vacTh('Clean','cost_clean','right') +
+      vacTh('Other','cost_other','right') +
+      '</tr>';
 
     const noData = lfTurnCostRows.length === 0
       ? 'No turn cost data yet — run a sync'
       : 'No vacant units';
 
-    // Store bills per unit so the drill-down handler can access them
+    // ── Step 3: store drill data and render ──
     window._costDrillData = {};
 
-    body = vacOnly2.map((r, ri) => {
-      const moDate  = parseDate(r.last_move_out);
-      const miDate  = costMiLookup[`${r.property}|${normUnit(r.unit)}`] || null;
-      const bills   = getBills(r, moDate, miDate);
-      const drillId = `cd_${ri}`;
+    const drillCell = (v, drillId, cat) => {
+      if (!v) return '<td style="text-align:right;color:#bbb">—</td>';
+      return '<td id="cell_' + drillId + '_' + cat + '"' +
+        ' style="text-align:right;font-weight:700;color:#222;cursor:pointer;text-decoration:underline dotted;border-radius:4px;transition:background 0.15s"' +
+        ' onclick="toggleCostDrill(\'' + drillId + '\',\'' + cat + '\')">' + fmtCost(v) + '</td>';
+    };
+
+    body = vacOnly2.map(({ r, bills, total, maint, paint, floor, clean, other }, ri) => {
+      const drillId = 'cd_' + ri;
       window._costDrillData[drillId] = bills;
-
-      const sum   = cat => bills.filter(b => b._cat === cat).reduce((s, b) => s + b.amount, 0);
-      const total = bills.reduce((s, b) => s + b.amount, 0);
-      const maint = sum('maint');
-      const paint = sum('paint');
-      const floor = sum('floor');
-      const clean = sum('clean');
-      const other = sum('inspect') + sum('appliance');
-      window._costSortTotals[ri] = { total, maint, paint, floor, clean, other };
       const noBills = bills.length === 0;
-
-      // Clickable cost cell — each gets a stable id so toggleCostDrill can highlight just the clicked one
-      const drillCell = (v, _warn, cat) => {
-        if (!v) return `<td style="text-align:right;color:#bbb">—</td>`;
-        return `<td id="cell_${drillId}_${cat}"
-          style="text-align:right;font-weight:700;color:#222;cursor:pointer;text-decoration:underline dotted;border-radius:4px;transition:background 0.15s"
-          onclick="toggleCostDrill('${drillId}','${cat}')">${fmtCost(v)}</td>`;
-      };
-
-      const unitRow = `<tr id="crow_${drillId}">
-        <td style="font-size:12px">${r.property||'—'}</td>
-        <td style="font-size:12px;color:#555">${r.unit||'—'}</td>
-        <td style="text-align:center;font-weight:700;color:${dvColor(r.days_vacant)}">${r.days_vacant||'—'}</td>
-        ${noBills
-          ? `<td style="text-align:right;color:#bbb;font-size:11px" colspan="6">no bills found</td>`
-          : `${drillCell(total, 4000, 'all')}${drillCell(maint, 2000, 'maint')}${drillCell(paint, 1000, 'paint')}${drillCell(floor, 1200, 'floor')}${drillCell(clean, 500, 'clean')}${drillCell(other, 1000, 'other')}`}
-      </tr>`;
-
-      // Hidden drill-down row (expands below the unit row)
-      const drillRow = `<tr id="drill_${drillId}" style="display:none;background:#f8fbff">
-        <td colspan="9" style="padding:0;border-bottom:2px solid #1565c0">
-          <div id="drillcontent_${drillId}" style="padding:10px 18px 14px"></div>
-        </td>
-      </tr>`;
-
-      return unitRow + drillRow;
-    }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${noData}</td></tr>`;
-
-    // Re-sort by cost columns (needs totals computed above)
-    const costColMap = { cost_total:'total', cost_maint:'maint', cost_paint:'paint',
-                         cost_floor:'floor', cost_clean:'clean', cost_other:'other' };
-    if (costColMap[vacSort.col]) {
-      const key = costColMap[vacSort.col];
-      vacOnly2.sort((a, b) => {
-        const ai = vacOnly2.indexOf(a), bi = vacOnly2.indexOf(b);
-        const av = (window._costSortTotals[ai]||{})[key] || 0;
-        const bv = (window._costSortTotals[bi]||{})[key] || 0;
-        return (av - bv) * vacSort.dir;
-      });
-      // Rebuild body after sort
-      body = vacOnly2.map((r, ri) => {
-        const t = window._costSortTotals[ri] || {};
-        const drillId2 = `cd_${ri}`;
-        // Re-render rows in new order using stored totals
-        const noBills2 = !t.total;
-        const drillCell2 = (v, cat) => {
-          if (!v) return `<td style="text-align:right;color:#bbb">—</td>`;
-          return `<td id="cell_${drillId2}_${cat}"
-            style="text-align:right;font-weight:700;color:#222;cursor:pointer;text-decoration:underline dotted;border-radius:4px;transition:background 0.15s"
-            onclick="toggleCostDrill('${drillId2}','${cat}')">${fmtCost(v)}</td>`;
-        };
-        return `<tr id="crow_${drillId2}">
-          <td style="font-size:12px">${r.property||'—'}</td>
-          <td style="font-size:12px;color:#555">${r.unit||'—'}</td>
-          <td style="text-align:center;font-weight:700;color:${dvColor(r.days_vacant)}">${r.days_vacant||'—'}</td>
-          ${noBills2 ? `<td style="text-align:right;color:#bbb;font-size:11px" colspan="6">no bills found</td>` :
-            `${drillCell2(t.total,'all')}${drillCell2(t.maint,'maint')}${drillCell2(t.paint,'paint')}${drillCell2(t.floor,'floor')}${drillCell2(t.clean,'clean')}${drillCell2(t.other,'other')}`}
-        </tr>
-        <tr id="drill_${drillId2}" style="display:none;background:#f8fbff">
-          <td colspan="9" style="padding:0;border-bottom:2px solid #1565c0">
-            <div id="drillcontent_${drillId2}" style="padding:10px 18px 14px"></div>
-          </td>
-        </tr>`;
-      }).join('');
-    }
+      return '<tr id="crow_' + drillId + '">' +
+        '<td style="font-size:12px">' + (r.property||'—') + '</td>' +
+        '<td style="font-size:12px;color:#555">' + (r.unit||'—') + '</td>' +
+        '<td style="text-align:center;font-weight:700;color:' + dvColor(r.days_vacant) + '">' + (r.days_vacant||'—') + '</td>' +
+        (noBills
+          ? '<td style="text-align:right;color:#bbb;font-size:11px" colspan="6">no bills found</td>'
+          : drillCell(total,'cd_'+ri,'all') + drillCell(maint,'cd_'+ri,'maint') + drillCell(paint,'cd_'+ri,'paint') +
+            drillCell(floor,'cd_'+ri,'floor') + drillCell(clean,'cd_'+ri,'clean') + drillCell(other,'cd_'+ri,'other')) +
+        '</tr>' +
+        '<tr id="drill_' + drillId + '" style="display:none;background:#f8fbff">' +
+          '<td colspan="9" style="padding:0;border-bottom:2px solid #1565c0">' +
+            '<div id="drillcontent_' + drillId + '" style="padding:10px 18px 14px"></div>' +
+          '</td>' +
+        '</tr>';
+    }).join('') || '<tr><td colspan="' + colspan + '" style="text-align:center;color:#aaa;padding:24px">' + noData + '</td></tr>';
 
     // Footer: total spend across all visible vacant units
-    const totalSpend = vacOnly2.reduce((s, r) => {
-      const moDate = parseDate(r.last_move_out);
-      const miDate = costMiLookup[`${r.property}|${normUnit(r.unit)}`] || null;
-      return s + getBills(r, moDate, miDate).reduce((ss, b) => ss + b.amount, 0);
-    }, 0);
+    const totalSpend = vacOnly2.reduce((s, x) => s + x.total, 0);
     const footer = $('vac-detail-footer');
     if (footer) footer.textContent = `${vacOnly2.length} vacant units · Total turn spend: $${totalSpend.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0})}${vacPOD ? ' · ' + vacPOD : ''}`;
 
