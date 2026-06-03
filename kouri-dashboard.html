@@ -2697,6 +2697,7 @@ function renderVacDetail() {
     // GL account overrides — checked before any keyword rules
     const cIsCleanGL  = b => /turnover clean|carpet clean|move.?out clean|unit clean|housekeep|janitorial/i.test((b.gl_account||'').toLowerCase());
     const cIsMaintGL  = b => /management charge|labour|labor/i.test((b.gl_account||'').toLowerCase());
+    const cIsOtherGL  = b => /utility|electric|gas unit/i.test((b.gl_account||'').toLowerCase());
     const cIsPaint    = b => /paint|repaint|touch.?up|primer|drywall|patch|texture/i.test(haystack(b));
     // Flooring: carpet only counts if it's NOT paired with "clean" in the same text
     const cIsFloor    = b => /floor|tile|vinyl|hardwood|laminate|lvp|lvt|subfloor|rug/i.test(haystack(b)) ||
@@ -2707,6 +2708,7 @@ function renderVacDetail() {
     const categorize  = b => {
       if (cIsCleanGL(b))  return 'clean';   // GL account overrides — always win
       if (cIsMaintGL(b))  return 'maint';
+      if (cIsOtherGL(b))  return 'appliance';  // utilities → Other bucket
       if (cIsPaint(b))    return 'paint';
       if (cIsFloor(b))    return 'floor';
       if (cIsClean(b))    return 'clean';
