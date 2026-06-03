@@ -2501,8 +2501,10 @@ function renderVacDetail() {
   let head = '', body = '', colspan = 7;
 
   const vacSortArrow = col => vacSort.col === col ? (vacSort.dir === 1 ? ' ↑' : ' ↓') : '';
-  const vacTh = (label, col, align) =>
-    `<th style="cursor:pointer;${align?`text-align:${align}`:''}${vacSort.col===col?';color:#006140':''}" onclick="setVacSort('${col}')">${label}${vacSortArrow(col)}</th>`;
+  const vacTh = (label, col, align) => {
+    const s = 'cursor:pointer' + (align ? ';text-align:' + align : '') + (vacSort.col === col ? ';color:#006140;font-weight:800' : '');
+    return '<th style="' + s + '" onclick="setVacSort(\'' + col + '\')">' + label + vacSortArrow(col) + '</th>';
+  };
 
   if (vacView === 'prop') {
     const propAgg = vacAggByProperty(src);
@@ -2510,9 +2512,10 @@ function renderVacDetail() {
     const pSortKey = { key: p=>p.key, pod: p=>p.pod, total: p=>p.total,
       vacant: p=>p.vacant, notice: p=>p.notice, futureIns: p=>p.futureIns, gt45: p=>p.gt45 };
     const pSortFn = pSortKey[vacSort.col] || (p => p.vacant);
+    const pDir = vacSort.col && pSortKey[vacSort.col] ? vacSort.dir : -1;
     propAgg.sort((a, b) => {
       const av = pSortFn(a), bv = pSortFn(b);
-      return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * vacSort.dir;
+      return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * pDir;
     });
     colspan = 7;
     head = `<tr>
@@ -2543,12 +2546,13 @@ function renderVacDetail() {
     const vacOnly = src.filter(r => /vacant/i.test(r.unit_status));
     // Apply sort (default: days vacant desc)
     const vSortKey = {
-      property: r => r.property, unit: r => r.unit,
-      days_vacant: r => parseInt(r.days_vacant)||0,
-      available: r => r.available || '',
+      property:    r => (r.property || '').toLowerCase(),
+      unit:        r => (r.unit || '').toLowerCase(),
+      days_vacant: r => parseInt(r.days_vacant) || 0,
+      available:   r => r.available || '',
     };
-    const vSortFn = vSortKey[vacSort.col] || (r => parseInt(r.days_vacant)||0);
-    const vSortDir = vacSort.col ? vacSort.dir : -1;
+    const vSortFn  = vSortKey[vacSort.col] || (r => parseInt(r.days_vacant) || 0);
+    const vSortDir = (vacSort.col && vSortKey[vacSort.col]) ? vacSort.dir : -1;
     vacOnly.sort((a, b) => {
       const av = vSortFn(a), bv = vSortFn(b);
       return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * vSortDir;
@@ -2690,8 +2694,9 @@ function renderVacDetail() {
     // ── Category classifiers — check description + GL account name + vendor name ──
     // Priority order: Paint → Flooring → Cleaning → Inspection → Appliances → Maintenance → Other
     const haystack = b => `${b.description||''} ${b.gl_account||''} ${b.vendor||''}`.toLowerCase();
-    // GL account names that must always go to clean — checked before any other rule
+    // GL account overrides — checked before any keyword rules
     const cIsCleanGL  = b => /turnover clean|carpet clean|move.?out clean|unit clean|housekeep|janitorial/i.test((b.gl_account||'').toLowerCase());
+    const cIsMaintGL  = b => /management charge|labour|labor/i.test((b.gl_account||'').toLowerCase());
     const cIsPaint    = b => /paint|repaint|touch.?up|primer|drywall|patch|texture/i.test(haystack(b));
     // Flooring: carpet only counts if it's NOT paired with "clean" in the same text
     const cIsFloor    = b => /floor|tile|vinyl|hardwood|laminate|lvp|lvt|subfloor|rug/i.test(haystack(b)) ||
@@ -2700,7 +2705,8 @@ function renderVacDetail() {
     const cIsInspect  = b => /inspect|punch.?list|assessment|walk.?through|make.?ready check/i.test(haystack(b));
     const cIsApplianc = b => /appliance|stove|oven|fridge|refrigerator|dishwasher|washer|dryer|hvac|furnace|water heat/i.test(haystack(b));
     const categorize  = b => {
-      if (cIsCleanGL(b))  return 'clean';   // GL account overrides — always wins
+      if (cIsCleanGL(b))  return 'clean';   // GL account overrides — always win
+      if (cIsMaintGL(b))  return 'maint';
       if (cIsPaint(b))    return 'paint';
       if (cIsFloor(b))    return 'floor';
       if (cIsClean(b))    return 'clean';
@@ -2709,44 +2715,28 @@ function renderVacDetail() {
       return 'maint';
     };
 
-    // ── Build bill lookup — match by normUnit(unit) within same property ──
-    // Also try fuzzy property match: bill property contains or is contained by vac property
-    const propMatch = (bp, vp) => {
-      if (!bp || !vp) return false;
-      const b = bp.toLowerCase(), v = vp.toLowerCase();
-      return b === v || b.includes(v.slice(0, 30)) || v.includes(b.slice(0, 30));
-    };
-
-    // Index bills by normUnit alone (for cases where property names differ slightly)
-    const billsByUnit = {};   // normUnit → [bill, ...]
-    const billsByKey  = {};   // property|normUnit → [bill, ...]
+    // ── Build bill lookup — exact property name + normalized unit only ──
+    // No fuzzy fallback: a unit number like "1" appears at many properties,
+    // so falling back to unit-only matching causes false assignments.
+    const billsByKey = {};   // property|normUnit → [bill, ...]
     lfTurnCostRows.forEach(b => {
       if (!b.unit) return;
       const bd = parseDate(b.bill_date);
       if (!bd) return;
-      const nu = normUnit(b.unit);
-      const key = `${b.property}|${nu}`;
-      if (!billsByKey[key])  billsByKey[key]  = [];
-      if (!billsByUnit[nu])  billsByUnit[nu]  = [];
-      const rec = { ...b, _date: bd, _cat: categorize(b) };
-      billsByKey[key].push(rec);
-      billsByUnit[nu].push(rec);
+      const key = `${b.property}|${normUnit(b.unit)}`;
+      if (!billsByKey[key]) billsByKey[key] = [];
+      billsByKey[key].push({ ...b, _date: bd, _cat: categorize(b) });
     });
 
     // For a given vacant unit row, find matching bills
     const getBills = (r, moDate, miDate) => {
-      const nu  = normUnit(r.unit);
-      const key = `${r.property}|${nu}`;
-      // Exact key match first, then fuzzy property match via unit-only index
-      let candidates = billsByKey[key] || [];
-      if (!candidates.length && billsByUnit[nu]) {
-        candidates = billsByUnit[nu].filter(b => propMatch(b.property, r.property));
-      }
-      // Filter to vacancy window: bill date >= move-out (or within 7 days before, to catch day-of bills)
+      const key = `${r.property}|${normUnit(r.unit)}`;
+      const candidates = billsByKey[key] || [];
+      // Filter to vacancy window: bill date >= move-out (7-day grace for same-day bills)
       const windowStart = moDate ? new Date(moDate.getTime() - 7*864e5) : null;
       return candidates.filter(b => {
-        if (windowStart && b._date < windowStart) return false;  // too old
-        if (miDate && b._date > miDate) return false;            // after move-in
+        if (windowStart && b._date < windowStart) return false;
+        if (miDate && b._date > miDate) return false;
         return true;
       });
     };
