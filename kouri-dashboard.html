@@ -302,12 +302,12 @@ body {
 .chip.on.orange { background: #e65100; border-color: #e65100; }
 .chip.on.amber  { background: #f57f17; border-color: #f57f17; }
 /* ─── Tables ─── */
-.tbl-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 280px); }
-.pod-tbl-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 240px); }
+.tbl-wrap { overflow-x: hidden; overflow-y: auto; max-height: calc(100vh - 280px); }
+.pod-tbl-wrap { overflow-x: hidden; overflow-y: auto; max-height: calc(100vh - 240px); }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 thead th {
   background: #f7f8fa;
-  padding: 9px 14px;
+  padding: 7px 10px;
   text-align: left;
   font-size: 10px;
   font-weight: 700;
@@ -334,7 +334,7 @@ tbody tr.selected { background: #e6f4ed !important; }
 tbody tr.selected td { font-weight: 500; }
 tbody tr.active-row { background: #e0f2e9 !important; box-shadow: inset 4px 0 0 #006140; }
 tbody tr.active-row td { font-weight: 700 !important; }
-tbody td { padding: 9px 14px; color: #333; }
+tbody td { padding: 7px 10px; color: #333; }
 /* ─── Badges ─── */
 .badge {
   display: inline-block;
@@ -2345,6 +2345,12 @@ let vacLoaded  = false;
 let lfPOD = null, lfDateRange = 'cw', lfView = 'gc';
 // Standalone vacancy tab state
 let vacPOD = null, vacView = 'prop';
+let vacSort = { col: null, dir: 1 };
+function setVacSort(col) {
+  vacSort.dir = vacSort.col === col ? -vacSort.dir : 1;
+  vacSort.col = col;
+  renderVacDetail();
+}
 
 // ── Vacancy aggregation helpers ────────────────────────────────────────
 function vacAgg(rows) {
@@ -2494,18 +2500,29 @@ function renderVacDetail() {
   let src = vacPOD ? lfVacRows.filter(r => r.pod === vacPOD) : lfVacRows;
   let head = '', body = '', colspan = 7;
 
+  const vacSortArrow = col => vacSort.col === col ? (vacSort.dir === 1 ? ' ↑' : ' ↓') : '';
+  const vacTh = (label, col, align) =>
+    `<th style="cursor:pointer;${align?`text-align:${align}`:''}${vacSort.col===col?';color:#006140':''}" onclick="setVacSort('${col}')">${label}${vacSortArrow(col)}</th>`;
+
   if (vacView === 'prop') {
     const propAgg = vacAggByProperty(src);
-    propAgg.sort((a, b) => (b.vacant - a.vacant) || a.key.localeCompare(b.key));
+    // Apply sort
+    const pSortKey = { key: p=>p.key, pod: p=>p.pod, total: p=>p.total,
+      vacant: p=>p.vacant, notice: p=>p.notice, futureIns: p=>p.futureIns, gt45: p=>p.gt45 };
+    const pSortFn = pSortKey[vacSort.col] || (p => p.vacant);
+    propAgg.sort((a, b) => {
+      const av = pSortFn(a), bv = pSortFn(b);
+      return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * vacSort.dir;
+    });
     colspan = 7;
     head = `<tr>
-      <th>Property</th>
-      <th style="text-align:center">POD</th>
-      <th style="text-align:center" title="All units">Total</th>
-      <th style="text-align:center" title="Currently vacant">Vacant</th>
-      <th style="text-align:center" title="On notice">Ftr Move Outs</th>
-      <th style="text-align:center" title="Scheduled move-ins">Ftr Move Ins</th>
-      <th style="text-align:center" title="Vacant >45 days">&gt;45 Days</th>
+      ${vacTh('Property','key',null)}
+      ${vacTh('POD','pod','center')}
+      ${vacTh('Total','total','center')}
+      ${vacTh('Vacant','vacant','center')}
+      ${vacTh('Ftr Move Outs','notice','center')}
+      ${vacTh('Ftr Move Ins','futureIns','center')}
+      ${vacTh('>45 Days','gt45','center')}
     </tr>`;
     const numCell2 = (val, color, bg) => {
       const hasVal = val > 0;
@@ -2524,14 +2541,25 @@ function renderVacDetail() {
 
   } else {
     const vacOnly = src.filter(r => /vacant/i.test(r.unit_status));
-    vacOnly.sort((a, b) => (parseInt(b.days_vacant)||0) - (parseInt(a.days_vacant)||0));
+    // Apply sort (default: days vacant desc)
+    const vSortKey = {
+      property: r => r.property, unit: r => r.unit,
+      days_vacant: r => parseInt(r.days_vacant)||0,
+      available: r => r.available || '',
+    };
+    const vSortFn = vSortKey[vacSort.col] || (r => parseInt(r.days_vacant)||0);
+    const vSortDir = vacSort.col ? vacSort.dir : -1;
+    vacOnly.sort((a, b) => {
+      const av = vSortFn(a), bv = vSortFn(b);
+      return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * vSortDir;
+    });
     colspan = 10;
     head = `<tr>
-      <th>Property</th>
-      <th>Unit</th>
+      ${vacTh('Property','property',null)}
+      ${vacTh('Unit','unit',null)}
       <th style="text-align:center">Bed/Bath</th>
-      <th style="text-align:center">Days Vacant</th>
-      <th>Move In Date</th>
+      ${vacTh('Days Vacant','days_vacant','center')}
+      ${vacTh('Move In Date','available',null)}
       <th style="text-align:center">Inspection</th>
       <th style="text-align:center">Maintenance</th>
       <th style="text-align:center">Paint</th>
@@ -2662,12 +2690,17 @@ function renderVacDetail() {
     // ── Category classifiers — check description + GL account name + vendor name ──
     // Priority order: Paint → Flooring → Cleaning → Inspection → Appliances → Maintenance → Other
     const haystack = b => `${b.description||''} ${b.gl_account||''} ${b.vendor||''}`.toLowerCase();
+    // GL account names that must always go to clean — checked before any other rule
+    const cIsCleanGL  = b => /turnover clean|carpet clean|move.?out clean|unit clean|housekeep|janitorial/i.test((b.gl_account||'').toLowerCase());
     const cIsPaint    = b => /paint|repaint|touch.?up|primer|drywall|patch|texture/i.test(haystack(b));
-    const cIsFloor    = b => /floor|carpet|tile|vinyl|hardwood|laminate|lvp|lvt|subfloor|rug/i.test(haystack(b));
-    const cIsClean    = b => /clean|housekeep|janitorial|deep clean|move.?out|turnover clean|saniti/i.test(haystack(b));
+    // Flooring: carpet only counts if it's NOT paired with "clean" in the same text
+    const cIsFloor    = b => /floor|tile|vinyl|hardwood|laminate|lvp|lvt|subfloor|rug/i.test(haystack(b)) ||
+                             (/carpet/i.test(haystack(b)) && !/clean/i.test(haystack(b)));
+    const cIsClean    = b => /clean|housekeep|janitorial|deep clean|move.?out|turnover|saniti/i.test(haystack(b));
     const cIsInspect  = b => /inspect|punch.?list|assessment|walk.?through|make.?ready check/i.test(haystack(b));
     const cIsApplianc = b => /appliance|stove|oven|fridge|refrigerator|dishwasher|washer|dryer|hvac|furnace|water heat/i.test(haystack(b));
     const categorize  = b => {
+      if (cIsCleanGL(b))  return 'clean';   // GL account overrides — always wins
       if (cIsPaint(b))    return 'paint';
       if (cIsFloor(b))    return 'floor';
       if (cIsClean(b))    return 'clean';
@@ -2729,17 +2762,31 @@ function renderVacDetail() {
       if (mi && (!costMiLookup[key] || mi > costMiLookup[key])) costMiLookup[key] = mi;
     });
 
+    // Apply sort to cost view
+    const cSortFn = {
+      property: r => r.property, unit: r => r.unit,
+      days_vacant: r => parseInt(r.days_vacant)||0,
+    }[vacSort.col];
+    if (cSortFn) {
+      vacOnly2.sort((a, b) => {
+        const av = cSortFn(a), bv = cSortFn(b);
+        return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * vacSort.dir;
+      });
+    }
+    // Cost-specific sort (total, maint, etc.) applied after bills are computed — handled per-row below via _billTotals
+    window._costSortTotals = {};
+
     colspan = 9;
     head = `<tr>
-      <th>Property</th>
-      <th>Unit</th>
-      <th style="text-align:center">Days Vacant</th>
-      <th style="text-align:right">Total</th>
-      <th style="text-align:right" title="Maintenance, repair, punch list">Maint</th>
-      <th style="text-align:right" title="Paint, drywall, primer">Paint</th>
-      <th style="text-align:right" title="Carpet, flooring, tile">Floor</th>
-      <th style="text-align:right" title="Cleaning, housekeeping">Clean</th>
-      <th style="text-align:right" title="Appliances, HVAC + inspections">Other</th>
+      ${vacTh('Property','property',null)}
+      ${vacTh('Unit','unit',null)}
+      ${vacTh('Days Vacant','days_vacant','center')}
+      ${vacTh('Total','cost_total','right')}
+      ${vacTh('Maint','cost_maint','right')}
+      ${vacTh('Paint','cost_paint','right')}
+      ${vacTh('Floor','cost_floor','right')}
+      ${vacTh('Clean','cost_clean','right')}
+      ${vacTh('Other','cost_other','right')}
     </tr>`;
 
     const noData = lfTurnCostRows.length === 0
@@ -2763,14 +2810,14 @@ function renderVacDetail() {
       const floor = sum('floor');
       const clean = sum('clean');
       const other = sum('inspect') + sum('appliance');
+      window._costSortTotals[ri] = { total, maint, paint, floor, clean, other };
       const noBills = bills.length === 0;
 
       // Clickable cost cell — each gets a stable id so toggleCostDrill can highlight just the clicked one
-      const drillCell = (v, warn, cat) => {
+      const drillCell = (v, _warn, cat) => {
         if (!v) return `<td style="text-align:right;color:#bbb">—</td>`;
-        const col = warn && v > warn ? '#c62828' : '#1565c0';
         return `<td id="cell_${drillId}_${cat}"
-          style="text-align:right;font-weight:700;color:${col};cursor:pointer;text-decoration:underline dotted;border-radius:4px;transition:background 0.15s"
+          style="text-align:right;font-weight:700;color:#222;cursor:pointer;text-decoration:underline dotted;border-radius:4px;transition:background 0.15s"
           onclick="toggleCostDrill('${drillId}','${cat}')">${fmtCost(v)}</td>`;
       };
 
@@ -2792,6 +2839,44 @@ function renderVacDetail() {
 
       return unitRow + drillRow;
     }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${noData}</td></tr>`;
+
+    // Re-sort by cost columns (needs totals computed above)
+    const costColMap = { cost_total:'total', cost_maint:'maint', cost_paint:'paint',
+                         cost_floor:'floor', cost_clean:'clean', cost_other:'other' };
+    if (costColMap[vacSort.col]) {
+      const key = costColMap[vacSort.col];
+      vacOnly2.sort((a, b) => {
+        const ai = vacOnly2.indexOf(a), bi = vacOnly2.indexOf(b);
+        const av = (window._costSortTotals[ai]||{})[key] || 0;
+        const bv = (window._costSortTotals[bi]||{})[key] || 0;
+        return (av - bv) * vacSort.dir;
+      });
+      // Rebuild body after sort
+      body = vacOnly2.map((r, ri) => {
+        const t = window._costSortTotals[ri] || {};
+        const drillId2 = `cd_${ri}`;
+        // Re-render rows in new order using stored totals
+        const noBills2 = !t.total;
+        const drillCell2 = (v, cat) => {
+          if (!v) return `<td style="text-align:right;color:#bbb">—</td>`;
+          return `<td id="cell_${drillId2}_${cat}"
+            style="text-align:right;font-weight:700;color:#222;cursor:pointer;text-decoration:underline dotted;border-radius:4px;transition:background 0.15s"
+            onclick="toggleCostDrill('${drillId2}','${cat}')">${fmtCost(v)}</td>`;
+        };
+        return `<tr id="crow_${drillId2}">
+          <td style="font-size:12px">${r.property||'—'}</td>
+          <td style="font-size:12px;color:#555">${r.unit||'—'}</td>
+          <td style="text-align:center;font-weight:700;color:${dvColor(r.days_vacant)}">${r.days_vacant||'—'}</td>
+          ${noBills2 ? `<td style="text-align:right;color:#bbb;font-size:11px" colspan="6">no bills found</td>` :
+            `${drillCell2(t.total,'all')}${drillCell2(t.maint,'maint')}${drillCell2(t.paint,'paint')}${drillCell2(t.floor,'floor')}${drillCell2(t.clean,'clean')}${drillCell2(t.other,'other')}`}
+        </tr>
+        <tr id="drill_${drillId2}" style="display:none;background:#f8fbff">
+          <td colspan="9" style="padding:0;border-bottom:2px solid #1565c0">
+            <div id="drillcontent_${drillId2}" style="padding:10px 18px 14px"></div>
+          </td>
+        </tr>`;
+      }).join('');
+    }
 
     // Footer: total spend across all visible vacant units
     const totalSpend = vacOnly2.reduce((s, r) => {
@@ -2917,8 +3002,7 @@ function toggleCostDrill(drillId, cat) {
     activeCell.style.color        = '#fff';
     activeCell.style.borderRadius = '4px';
   }
-
-  drillRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  // No scrollIntoView — drill row expands inline below the clicked row
 }
 
 function renderVacTrend() {
