@@ -2817,11 +2817,12 @@ function renderVacDetail() {
       return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * cSortDir;
     });
 
-    colspan = 9;
+    colspan = 10;
     head = '<tr>' +
       vacTh('Property','property',null) +
-      vacTh('Unit','unit',null) +
+      '<th style="text-align:center;font-size:10px;color:#888;font-weight:700;text-transform:uppercase;padding:6px 6px;white-space:nowrap">Unit</th>' +
       vacTh('Days Vacant','days_vacant','center') +
+      '<th style="text-align:center;font-size:10px;color:#888;font-weight:700;text-transform:uppercase;padding:6px 8px;white-space:nowrap" title="Days from move-out to inspection">Inspection</th>' +
       vacTh('Total','cost_total','right') +
       vacTh('Maint','cost_maint','right') +
       vacTh('Paint','cost_paint','right') +
@@ -2848,17 +2849,22 @@ function renderVacDetail() {
       const drillId = 'cd_' + ri;
       window._costDrillData[drillId] = bills;
       const noBills = bills.length === 0;
+      const moDate2  = parseDate(r.last_move_out);
+      const miDate2  = costMiLookup[r.property + '|' + normUnit(r.unit)] || null;
+      const unitKey2 = r.property + '|' + normUnit(r.unit);
+      const inspCell = mkInspCell(unitKey2, moDate2, miDate2, r.inspection);
       return '<tr id="crow_' + drillId + '">' +
         '<td style="font-size:12px">' + (r.property||'—') + '</td>' +
-        '<td style="font-size:12px;color:#555">' + (r.unit||'—') + '</td>' +
+        '<td style="font-size:11px;color:#888;text-align:center;white-space:nowrap;padding:6px 4px">' + (r.unit||'—') + '</td>' +
         '<td style="text-align:center;font-weight:700;color:' + dvColor(r.days_vacant) + '">' + (r.days_vacant||'—') + '</td>' +
+        inspCell +
         (noBills
           ? '<td style="text-align:right;color:#bbb;font-size:11px" colspan="6">no bills found</td>'
           : drillCell(total,'cd_'+ri,'all') + drillCell(maint,'cd_'+ri,'maint') + drillCell(paint,'cd_'+ri,'paint') +
             drillCell(floor,'cd_'+ri,'floor') + drillCell(clean,'cd_'+ri,'clean') + drillCell(other,'cd_'+ri,'other')) +
         '</tr>' +
         '<tr id="drill_' + drillId + '" style="display:none;background:#f8fbff">' +
-          '<td colspan="9" style="padding:0;border-bottom:2px solid #1565c0">' +
+          '<td colspan="10" style="padding:0;border-bottom:2px solid #1565c0">' +
             '<div id="drillcontent_' + drillId + '" style="padding:10px 18px 14px"></div>' +
           '</td>' +
         '</tr>';
