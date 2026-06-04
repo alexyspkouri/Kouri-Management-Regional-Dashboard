@@ -2550,11 +2550,16 @@ function renderVacDetail() {
     const vacOnly = src.filter(r => /vacant/i.test(r.unit_status));
     // Apply sort (default: days vacant desc)
     const vSortKey = {
-      property:    r => (r.property || '').toLowerCase(),
-      unit:        r => (r.unit || '').toLowerCase(),
-      days_vacant: r => parseInt(r.days_vacant) || 0,
-      available:   r => r.available || '',
-      move_out:    r => r.last_move_out || '',
+      property:     r => (r.property || '').toLowerCase(),
+      unit:         r => (r.unit || '').toLowerCase(),
+      days_vacant:  r => parseInt(r.days_vacant) || 0,
+      available:    r => r.available || '',
+      move_out:     r => r.last_move_out || '',
+      insp_date:    r => r.inspection || '',
+      maint_status: r => r.maintenance || '',
+      paint_status: r => r.paint || '',
+      floor_status: r => r.flooring || '',
+      clean_status: r => r.cleaning || '',
     };
     const vSortFn  = vSortKey[vacSort.col] || (r => parseInt(r.days_vacant) || 0);
     const vSortDir = (vacSort.col && vSortKey[vacSort.col]) ? vacSort.dir : -1;
@@ -2570,11 +2575,11 @@ function renderVacDetail() {
       ${vacTh('Days Vacant','days_vacant','center')}
       ${vacTh('Move In','available',null)}
       ${vacTh('Move Out','move_out','center')}
-      <th style="text-align:center" title="Days from move-out to inspection">Inspection</th>
-      <th style="text-align:center">Maintenance</th>
-      <th style="text-align:center">Paint</th>
-      <th style="text-align:center">Flooring</th>
-      <th style="text-align:center">Cleaning</th>
+      ${vacTh('Inspection','insp_date','center')}
+      ${vacTh('Maintenance','maint_status','center')}
+      ${vacTh('Paint','paint_status','center')}
+      ${vacTh('Flooring','floor_status','center')}
+      ${vacTh('Cleaning','clean_status','center')}
     </tr>`;
 
     // Build scheduled move-in lookup: property|normUnit → { date, str }
@@ -2675,8 +2680,8 @@ function renderVacDetail() {
         const d = w.service_request_desc || w.category || 'Open WO';
         return d + (w.days !== null ? ` (${w.days}d)` : '');
       }).join('\n');
-      const woUrl = top.service_request_id && top.work_order_id
-        ? `https://kmcprops.appfolio.com/maintenance/service_requests/${top.service_request_id}/work_orders/${top.work_order_id}`
+      const woUrl = top.service_request_id
+        ? `https://kmcprops.appfolio.com/maintenance/service_requests/${top.service_request_id}`
         : null;
       const labelEl = woUrl
         ? `<a href="${woUrl}" target="_blank" style="color:#b45309;text-decoration:underline dotted;font-weight:600">${label}</a>`
