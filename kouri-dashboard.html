@@ -2821,22 +2821,44 @@ function renderVacDetail() {
       const remodelBills   = getUnitBills(unitKey, 'remodel',   moDate, miDate);
       const applianceBills = getUnitBills(unitKey, 'appliance', moDate, miDate);
 
+      const vdrillId = 'vd_' + ri;
+      if (!window._vdetDrillData) window._vdetDrillData = {};
+      window._vdetDrillData[vdrillId] = {
+        maint:     { wos: maintWOs,  bills: maintBills },
+        paint:     { wos: paintWOs,  bills: paintBills },
+        floor:     { wos: floorWOs,  bills: floorBills },
+        clean:     { wos: [],        bills: cleanBills },
+        remodel:   { wos: [],        bills: remodelBills },
+        appliance: { wos: [],        bills: applianceBills },
+      };
+      const mkVdCell = (wos, bills, fallback, alwaysShow, cat) => {
+        const base = mkWOCell(wos, bills, fallback, alwaysShow);
+        // Wrap the td to add id + onclick for drill-down
+        const oid = 'vdcell_' + vdrillId + '_' + cat;
+        const oclick = 'toggleVdetDrill(' + JSON.stringify(vdrillId) + ',' + JSON.stringify(cat) + ')';
+        return base.replace('<td ', '<td id="' + oid + '" onclick="' + oclick + '" style="cursor:pointer;" ');
+      };
       const moStr = moDate ? moDate.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
-      return `<tr>
-        <td>${r.property||'—'}${badgeI(r.internet)}${badgeW(r.website)}</td>
+      return '<tr id="vrow_' + vdrillId + '">' +
+        `<td>${r.property||'—'}${badgeI(r.internet)}${badgeW(r.website)}</td>
         <td style="font-size:12px;color:#555">${r.unit||'—'}</td>
         <td style="text-align:center;font-size:12px">${bedBath}</td>
         <td style="text-align:center;font-weight:700;color:${dvColor(r.days_vacant)}">${r.days_vacant||'—'}</td>
         <td style="font-size:12px;color:#2e7d32;font-weight:600">${miStr}</td>
         <td style="text-align:center;font-size:12px;color:#555">${moStr}</td>
-        ${mkInspCell(unitKey, moDate, miDate, r.inspection)}
-        ${mkWOCell(maintWOs, maintBills, r.maintenance, true)}
-        ${mkWOCell(paintWOs, paintBills, r.paint, false)}
-        ${mkWOCell(floorWOs, floorBills, r.flooring, false)}
-        ${mkWOCell([], cleanBills, r.cleaning, true)}
-        ${mkWOCell([], remodelBills, '', false)}
-        ${mkWOCell([], applianceBills, '', false)}
-      </tr>`;
+        ${mkInspCell(unitKey, moDate, miDate, r.inspection)}` +
+        mkVdCell(maintWOs,   maintBills,   r.maintenance, true,  'maint') +
+        mkVdCell(paintWOs,   paintBills,   r.paint,       false, 'paint') +
+        mkVdCell(floorWOs,   floorBills,   r.flooring,    false, 'floor') +
+        mkVdCell([],         cleanBills,   r.cleaning,    true,  'clean') +
+        mkVdCell([],         remodelBills, '',            false, 'remodel') +
+        mkVdCell([],         applianceBills, '',          false, 'appliance') +
+        '</tr>' +
+        '<tr id="vdrill_' + vdrillId + '" style="display:none;background:#f8fbff">' +
+          '<td colspan="13" style="padding:0;border-bottom:2px solid #1565c0">' +
+            '<div id="vdrillcontent_' + vdrillId + '"></div>' +
+          '</td>' +
+        '</tr>';
     }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
   }
 
@@ -3143,6 +3165,127 @@ function toggleCostDrill(drillId, cat) {
     activeCell.style.borderRadius = '4px';
   }
   // No scrollIntoView — drill row expands inline below the clicked row
+}
+
+
+let _openVdetDrill = null;
+
+function closeVdetDrill(id) {
+  if (!id) return;
+  const dr = $('vdrill_' + id);
+  const ur = $('vrow_'  + id);
+  if (dr) { dr.style.display = 'none'; dr.dataset.openCat = ''; }
+  if (ur) ur.style.background = '';
+  ['maint','paint','floor','clean','remodel','appliance'].forEach(c => {
+    const cel = $('vdcell_' + id + '_' + c);
+    if (cel) { cel.style.outline = ''; cel.style.background = ''; }
+  });
+}
+
+function toggleVdetDrill(vdrillId, cat) {
+  const drillRow = $('vdrill_' + vdrillId);
+  const unitRow  = $('vrow_'  + vdrillId);
+  const content  = $('vdrillcontent_' + vdrillId);
+  if (!drillRow || !content) return;
+
+  if (drillRow.style.display !== 'none' && drillRow.dataset.openCat === cat) {
+    closeVdetDrill(vdrillId);
+    _openVdetDrill = null;
+    return;
+  }
+  if (_openVdetDrill && _openVdetDrill !== vdrillId) closeVdetDrill(_openVdetDrill);
+  closeVdetDrill(vdrillId);
+
+  const data = ((window._vdetDrillData || {})[vdrillId] || {})[cat] || { wos: [], bills: [] };
+  const { wos, bills } = data;
+
+  const fmtD = d => { const dt = parseDate(d); return dt ? dt.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—'; };
+  const fmtA = v => '$' + Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const catNames = { maint:'Maintenance', paint:'Paint / Drywall', floor:'Flooring',
+                     clean:'Cleaning', remodel:'Remodel', appliance:'Appliances' };
+
+  // ── Table 1: Work Orders ──────────────────────────────────────────
+  let woTable = '';
+  if (wos.length > 0) {
+    const woRows = wos.map(wo => {
+      const woUrl = wo.service_request_id
+        ? 'https://kmcprops.appfolio.com/maintenance/service_requests/' + wo.service_request_id : null;
+      const woLink = woUrl
+        ? '<a href="' + woUrl + '" target="_blank" style="color:#1565c0;text-decoration:underline dotted;font-weight:700">' + (wo.wo||'—') + '</a>'
+        : (wo.wo||'—');
+      const stCol = /work done|completed/i.test(wo.status||'') ? '#2e7d32'
+                  : /assigned|scheduled/i.test(wo.status||'') ? '#1565c0' : '#e65100';
+      return '<tr style="border-bottom:1px solid #eee">' +
+        '<td style="font-size:11px;white-space:nowrap">' + woLink + '</td>' +
+        '<td style="font-size:11px">' + ((wo.service_request_desc||wo.category||'').slice(0,40)||'—') + '</td>' +
+        '<td style="font-size:11px;color:#666">' + (wo.vendor||'—') + '</td>' +
+        '<td style="font-size:11px;color:' + stCol + ';font-weight:600">' + (wo.status||'—') + '</td>' +
+        '<td style="font-size:11px;text-align:center;color:' + stCol + '">' + (wo.days != null ? wo.days + 'd' : '—') + '</td>' +
+        '</tr>';
+    }).join('');
+    woTable = '<div style="margin-bottom:10px">' +
+      '<div style="font-size:11px;font-weight:700;color:#1565c0;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px">Work Orders (' + wos.length + ')</div>' +
+      '<table style="width:100%;border-collapse:collapse;font-size:12px">' +
+        '<thead><tr style="background:#e8f0fe">' +
+          '<th style="padding:4px 8px;text-align:left;font-size:10px;color:#555;text-transform:uppercase">WO #</th>' +
+          '<th style="padding:4px 8px;text-align:left;font-size:10px;color:#555;text-transform:uppercase">Description</th>' +
+          '<th style="padding:4px 8px;text-align:left;font-size:10px;color:#555;text-transform:uppercase">Vendor</th>' +
+          '<th style="padding:4px 8px;text-align:left;font-size:10px;color:#555;text-transform:uppercase">Status</th>' +
+          '<th style="padding:4px 8px;text-align:center;font-size:10px;color:#555;text-transform:uppercase">Age</th>' +
+        '</tr></thead>' +
+        '<tbody style="background:white">' + woRows + '</tbody>' +
+      '</table></div>';
+  }
+
+  // ── Table 2: Bills ────────────────────────────────────────────────
+  let billTable = '';
+  if (bills.length > 0) {
+    const sortedBills = [...bills].sort((a,b) => (b._date||0) - (a._date||0));
+    const billTotal = bills.reduce((s,b) => s + b.amount, 0);
+    const billRows = sortedBills.map(b =>
+      '<tr style="border-bottom:1px solid #eee">' +
+        '<td style="font-size:11px;white-space:nowrap">' + fmtD(b.bill_date) + '</td>' +
+        '<td style="font-size:11px;font-weight:600">' + (b.vendor||'—') + '</td>' +
+        '<td style="font-size:11px;color:#666">' + (b.gl_account||'—') + '</td>' +
+        '<td style="font-size:11px;color:#444;max-width:200px">' + ((b.description||'').slice(0,40)||'—') + '</td>' +
+        '<td style="font-size:11px;color:#555">' + (b.payment_status||'—') + '</td>' +
+        '<td style="font-size:12px;font-weight:700;text-align:right;color:#1565c0">' + fmtA(b.amount) + '</td>' +
+      '</tr>'
+    ).join('');
+    billTable = '<div>' +
+      '<div style="font-size:11px;font-weight:700;color:#1565c0;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px">Bills (' + bills.length + ')</div>' +
+      '<table style="width:100%;border-collapse:collapse;font-size:12px">' +
+        '<thead><tr style="background:#e8f0fe">' +
+          '<th style="padding:4px 8px;text-align:left;font-size:10px;color:#555;text-transform:uppercase">Date</th>' +
+          '<th style="padding:4px 8px;text-align:left;font-size:10px;color:#555;text-transform:uppercase">Vendor</th>' +
+          '<th style="padding:4px 8px;text-align:left;font-size:10px;color:#555;text-transform:uppercase">GL Account</th>' +
+          '<th style="padding:4px 8px;text-align:left;font-size:10px;color:#555;text-transform:uppercase">Description</th>' +
+          '<th style="padding:4px 8px;text-align:left;font-size:10px;color:#555;text-transform:uppercase">Status</th>' +
+          '<th style="padding:4px 8px;text-align:right;font-size:10px;color:#555;text-transform:uppercase">Amount</th>' +
+        '</tr></thead>' +
+        '<tbody style="background:white">' + billRows + '</tbody>' +
+        '<tfoot><tr style="background:#e8f0fe;font-weight:700">' +
+          '<td colspan="5" style="padding:5px 8px;font-size:11px;color:#555">Total</td>' +
+          '<td style="padding:5px 8px;text-align:right;color:#1565c0">' + fmtA(billTotal) + '</td>' +
+        '</tr></tfoot>' +
+      '</table></div>';
+  }
+
+  if (!woTable && !billTable) {
+    content.innerHTML = '<div style="padding:12px;text-align:center;color:#aaa;font-size:12px">No work orders or bills found for this category.</div>';
+  } else {
+    content.innerHTML = '<div style="padding:10px 18px 14px">' +
+      '<div style="font-size:12px;font-weight:700;color:#333;margin-bottom:10px">' + (catNames[cat]||cat) + '</div>' +
+      woTable + billTable + '</div>';
+  }
+
+  drillRow.dataset.openCat = cat;
+  drillRow.style.display = '';
+  _openVdetDrill = vdrillId;
+
+  if (unitRow) unitRow.style.background = '#dbeafe';
+  const activeCell = $('vdcell_' + vdrillId + '_' + cat);
+  if (activeCell) activeCell.style.outline = '2px solid #1565c0';
 }
 
 function renderVacTrend() {
@@ -3562,7 +3705,7 @@ async function loadLFInspections() {
 async function loadLFTurnCosts() {
   if (GIDS.lfTurnCosts === '000000000') return;  // GID not yet set — run sync first
   const raw = await fetchGViz(GIDS.lfTurnCosts);
-  lfTurnCostRows = raw.map(r => ({
+  lfTurnCostRows = raw.filter(r => !/clearing/i.test(r['GL Account'] || '')).map(r => ({
     bill_date      : r['Bill Date']       || '',
     property       : r['Property']        || '',
     pod            : r['POD']             || '',
