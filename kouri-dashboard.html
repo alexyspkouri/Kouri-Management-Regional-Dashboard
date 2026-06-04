@@ -1377,6 +1377,8 @@ async function loadWO() {
         service_request_id    : String(r['Service Request ID'] || ''),
         work_order_id         : String(r['Work Order ID'] || ''),
         job_description       : r['Job Description'] || '',
+        instructions          : r['Instructions'] || '',
+        unit_turn_category    : r['Unit Turn Category'] || '',
       };
       row.wo_category = woCategory(row);
       row.days        = daysSince(row.created_date);
@@ -2557,6 +2559,7 @@ function renderVacDetail() {
       available:    r => r.available || '',
       move_out:     r => r.last_move_out || '',
       insp_date:    r => r.inspection || '',
+      total_cost:   r => 0,
       maint_status: r => r.maintenance || '',
       paint_status: r => r.paint || '',
       floor_status: r => r.flooring || '',
@@ -2570,7 +2573,7 @@ function renderVacDetail() {
       const av = vSortFn(a), bv = vSortFn(b);
       return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * vSortDir;
     });
-    colspan = 13;
+    colspan = 14;
     head = `<tr>
       ${vacTh('Property','property',null)}
       ${vacTh('Unit','unit',null)}
@@ -2579,12 +2582,13 @@ function renderVacDetail() {
       ${vacTh('Move In','available',null)}
       ${vacTh('Move Out','move_out','center')}
       ${vacTh('Inspection','insp_date','center')}
+      ${vacTh('Total Cost','total_cost','right')}
       ${vacTh('Maintenance','maint_status','center')}
       ${vacTh('Paint','paint_status','center')}
       ${vacTh('Flooring','floor_status','center')}
-      ${vacTh('Cleaning','clean_status','center')}
       ${vacTh('Remodel','remodel_status','center')}
       ${vacTh('Appliances','appliance_status','center')}
+      ${vacTh('Cleaning','clean_status','center')}
     </tr>`;
 
     // Build scheduled move-in lookup: property|normUnit → { date, str }
@@ -2625,7 +2629,7 @@ function renderVacDetail() {
     });
 
     // WO type classifiers — check job_description, service_request_desc, category, AND vendor
-    const wHay    = wo => (wo.job_description||'') + ' ' + (wo.service_request_desc||'') + ' ' + (wo.category||'') + ' ' + (wo.vendor||'');
+    const wHay    = wo => (wo.job_description||'') + ' ' + (wo.instructions||'') + ' ' + (wo.unit_turn_category||'') + ' ' + (wo.service_request_desc||'') + ' ' + (wo.category||'') + ' ' + (wo.vendor||'');
     const wIsPaint = wo => /paint|repaint|touch.?up|primer|drywall|patch|texture/i.test(wHay(wo));
     const wIsFloor = wo => /floor|carpet|tile|vinyl|hardwood|laminate|lvp|lvt|subfloor/i.test(wHay(wo)) &&
                            !/paint/i.test(wHay(wo));  // carpet painting shouldn't be floor
@@ -2642,7 +2646,8 @@ function renderVacDetail() {
       // GL account overrides — always win
       if (/turnover clean|carpet clean|move.?out clean|housekeep|janitorial/.test(gl)) return 'clean';
       if (/management charge|labour|labor|drain/.test(gl)) return 'maint';
-      if (/utility|electric|gas unit|junk removal|trash removal/.test(gl)) return 'other';
+      if (/utility|electric|gas unit/.test(gl)) return 'other';
+      if (/junk removal|trash removal/.test(gl)) return 'clean';
       if (/remodel|general repairs/.test(gl)) return 'remodel';
       // Keyword matching
       if (/paint|repaint|touch.?up|primer|drywall|patch|texture/.test(h)) return 'paint';
@@ -2758,7 +2763,7 @@ function renderVacDetail() {
       if (hasWO) {
         typeWOs.sort((a, b) => (a.days === null ? 999 : a.days) - (b.days === null ? 999 : b.days));
         const top   = typeWOs[0];
-        const desc  = top.job_description || top.service_request_desc || top.category || 'Open WO';
+        const desc  = top.job_description || top.instructions || top.service_request_desc || top.unit_turn_category || top.category || 'Open WO';
         const short = desc.length > 24 ? desc.slice(0,24) + '…' : desc;
         const label = typeWOs.length === 1 ? short : typeWOs.length + ' WOs';
         const age   = top.days != null ? top.days + 'd' : '';
@@ -2812,6 +2817,7 @@ function renderVacDetail() {
       const cleanWOs     = unitWOs.filter(wo => !wIsPaint(wo) && !wIsFloor(wo) && wIsClean(wo));
       const applianceWOs = unitWOs.filter(wo => !wIsPaint(wo) && !wIsFloor(wo) && !wIsClean(wo) && wIsAppliance(wo));
       const maintWOs     = unitWOs.filter(wo => !wIsPaint(wo) && !wIsFloor(wo) && !wIsClean(wo) && !wIsAppliance(wo));
+      const allBills     = ['maint','paint','floor','clean','remodel','appliance','inspect'].flatMap(c => getUnitBills(unitKey, c, moDate, miDate));
       const maintBills   = getUnitBills(unitKey, 'maint',   moDate, miDate);
       const paintBills   = getUnitBills(unitKey, 'paint',   moDate, miDate);
       const floorBills   = getUnitBills(unitKey, 'floor',   moDate, miDate);
@@ -2822,6 +2828,7 @@ function renderVacDetail() {
       const vdrillId = 'vd_' + ri;
       if (!window._vdetDrillData) window._vdetDrillData = {};
       window._vdetDrillData[vdrillId] = {
+        all:       { wos: [], bills: allBills },
         maint:     { wos: maintWOs,  bills: maintBills },
         paint:     { wos: paintWOs,  bills: paintBills },
         floor:     { wos: floorWOs,  bills: floorBills },
@@ -2837,6 +2844,14 @@ function renderVacDetail() {
         const style  = 'cursor:pointer;text-align:center;line-height:1.5;padding:5px 4px;' + bg;
         return '<td id="' + oid + '" onclick="' + oclick + '" style="' + style + '">' + inner + '</td>';
       };
+      const mkVdCellTotal = (bills) => {
+        const total = bills.reduce((s, b) => s + b.amount, 0);
+        if (!total) return '<td style="text-align:right;color:#bbb;font-size:11px">—</td>';
+        const fmtT = v => '$' + v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+        const oid    = 'vdcell_' + vdrillId + '_all';
+        const oclick = "toggleVdetDrill('" + vdrillId + "','all')";
+        return '<td id="' + oid + '" onclick="' + oclick + '" style="text-align:right;font-weight:700;font-size:12px;color:#1565c0;cursor:pointer;text-decoration:underline dotted;padding:6px 8px">' + fmtT(total) + '</td>';
+      };
       const moStr = moDate ? moDate.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
       return '<tr id="vrow_' + vdrillId + '">' +
         `<td>${r.property||'—'}${badgeI(r.internet)}${badgeW(r.website)}</td>
@@ -2846,15 +2861,16 @@ function renderVacDetail() {
         <td style="font-size:12px;color:#2e7d32;font-weight:600">${miStr}</td>
         <td style="text-align:center;font-size:12px;color:#555">${moStr}</td>
         ${mkInspCell(unitKey, moDate, miDate, r.inspection)}` +
+        mkVdCellTotal(allBills) +
         mkVdCell(maintWOs,     maintBills,     r.maintenance, true,  'maint') +
         mkVdCell(paintWOs,     paintBills,     r.paint,       false, 'paint') +
         mkVdCell(floorWOs,     floorBills,     r.flooring,    false, 'floor') +
-        mkVdCell(cleanWOs,     cleanBills,     r.cleaning,    true,  'clean') +
         mkVdCell([],           remodelBills,   '',            false, 'remodel') +
         mkVdCell(applianceWOs, applianceBills, '',            false, 'appliance') +
+        mkVdCell(cleanWOs,     cleanBills,     r.cleaning,    true,  'clean') +
         '</tr>' +
         '<tr id="vdrill_' + vdrillId + '" style="display:none;background:#f8fbff">' +
-          '<td colspan="13" style="padding:0;border-bottom:2px solid #1565c0">' +
+          '<td colspan="14" style="padding:0;border-bottom:2px solid #1565c0">' +
             '<div id="vdrillcontent_' + vdrillId + '"></div>' +
           '</td>' +
         '</tr>';
@@ -2875,7 +2891,8 @@ function renderVacDetail() {
     // GL account overrides — checked before any keyword rules
     const cIsCleanGL  = b => /turnover clean|carpet clean|move.?out clean|unit clean|housekeep|janitorial/i.test((b.gl_account||'').toLowerCase());
     const cIsMaintGL  = b => /management charge|labour|labor|drain/i.test((b.gl_account||'').toLowerCase());
-    const cIsOtherGL  = b => /utility|electric|gas unit|junk removal|trash removal/i.test((b.gl_account||'').toLowerCase());
+    const cIsOtherGL  = b => /utility|electric|gas unit/i.test((b.gl_account||'').toLowerCase());
+    const cIsJunkGL   = b => /junk removal|trash removal/i.test((b.gl_account||'').toLowerCase());
     const cIsRemodel  = b => /remodel|general repairs/i.test((b.gl_account||'').toLowerCase());
     const cIsKouriVen = b => /kouri/i.test((b.vendor||'').toLowerCase());
     const cIsPaint    = b => /paint|repaint|touch.?up|primer|drywall|patch|texture/i.test(haystack(b));
@@ -2888,6 +2905,7 @@ function renderVacDetail() {
       if (cIsCleanGL(b))  return 'clean';    // GL overrides — always win
       if (cIsMaintGL(b))  return 'maint';    // Kouri labor/mgmt charges
       if (cIsOtherGL(b))  return 'appliance';
+      if (cIsJunkGL(b))   return 'clean';    // junk/trash → cleaning
       if (cIsRemodel(b))  return 'remodel';  // explicit remodel GL accounts
       if (cIsPaint(b))    return 'paint';
       if (cIsFloor(b))    return 'floor';
@@ -4329,28 +4347,62 @@ function renderLFDetail() {
   $('lf-detail-body').innerHTML = body;
   $('lf-detail-footer').textContent = src.length + ' record' + (src.length!==1?'s':'') + (lfPOD ? ' · ' + lfPOD : '');
 }
+// ─── LAST SYNC TIMESTAMP ─────────────────────────────────────────
+async function loadLastSync() {
+  try {
+    // Fetch last row of Sync Log tab by sheet name (ORDER BY timestamp DESC)
+    const cb = '_gvizSync' + Date.now();
+    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=responseHandler:${cb}&sheet=Sync%20Log&tq=SELECT%20A%20ORDER%20BY%20A%20DESC%20LIMIT%201&headers=1`;
+    const result = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { delete window[cb]; resolve(null); }, 8000);
+      window[cb] = resp => {
+        clearTimeout(timer); delete window[cb];
+        if (resp.status === 'error') { resolve(null); return; }
+        const rows = resp.table.rows || [];
+        resolve(rows.length > 0 && rows[0].c[0] ? rows[0].c[0].v : null);
+      };
+      const s = document.createElement('script');
+      s.onerror = () => { clearTimeout(timer); delete window[cb]; resolve(null); };
+      s.src = url;
+      document.head.appendChild(s);
+    });
+    if (result) {
+      const d = new Date(result);
+      if (!isNaN(d)) {
+        $('lastUpdated').textContent = 'Data as of ' + d.toLocaleString('en-US',
+          { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
+        return;
+      }
+    }
+  } catch(e) { /* fall through to default */ }
+}
+
 // ─── INIT ─────────────────────────────────────────────────────
 (async () => {
   applyAccessControl();
-  $('lastUpdated').textContent = 'Refreshed ' + new Date().toLocaleString('en-US',
-    { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
+  $('lastUpdated').textContent = 'Loading sync time…';
   const CLOUD_FUNCTION_URL = 'https://us-central1-appfolio-dashboard-491122.cloudfunctions.net/sync_appfolio_data';
   const refreshBtn = document.getElementById('refreshBtn');
   if (refreshBtn) {
     const SYNC_STEPS = [
-      { label: 'Step 1/13 · Delinquency report',    dur: 6  },
-      { label: 'Step 2/13 · Work orders',            dur: 5  },
-      { label: 'Step 3/13 · Rent roll',              dur: 7  },
-      { label: 'Step 4/13 · Move ins / move outs',   dur: 5  },
-      { label: 'Step 5/13 · Renewals',               dur: 4  },
-      { label: 'Step 6/13 · Occupancy metrics',      dur: 5  },
-      { label: 'Step 7/13 · Leasing agents',         dur: 4  },
-      { label: 'Step 8/13 · Retention',              dur: 6  },
-      { label: 'Step 9/13 · Retention monthly',      dur: 5  },
-      { label: 'Step 10/13 · Guest cards',           dur: 7  },
-      { label: 'Step 11/13 · Showings',              dur: 5  },
-      { label: 'Step 12/13 · Applications',          dur: 6  },
-      { label: 'Step 13/13 · Security deposits GL',  dur: 5  },
+      { label: 'Step 1/18  · Occupancy & leasing',       dur: 8  },
+      { label: 'Step 2/18  · Parallel API fetches',       dur: 20 },
+      { label: 'Step 3/18  · Delinquency',                dur: 3  },
+      { label: 'Step 4/18  · Maintenance & work orders',  dur: 5  },
+      { label: 'Step 5/18  · Receipts compliance',        dur: 2  },
+      { label: 'Step 6/18  · Delinquency audit',          dur: 2  },
+      { label: 'Step 7/18  · POD summary',                dur: 1  },
+      { label: 'Step 8/18  · Tenant retention',           dur: 2  },
+      { label: 'Step 9/18  · Retention monthly',          dur: 3  },
+      { label: 'Step 10/18 · Retention history',          dur: 3  },
+      { label: 'Step 11/18 · Guest cards',                dur: 8  },
+      { label: 'Step 12/18 · Showings',                   dur: 5  },
+      { label: 'Step 13/18 · Applications',               dur: 6  },
+      { label: 'Step 14/18 · Security deposits',          dur: 5  },
+      { label: 'Step 15/18 · Scheduled move-ins',         dur: 2  },
+      { label: 'Step 16/18 · Inspections',                dur: 8  },
+      { label: 'Step 17/18 · Unit vacancy',               dur: 8  },
+      { label: 'Step 18/18 · Turn costs (bills)',         dur: 15 },
     ];
     const TOTAL_DUR = SYNC_STEPS.reduce((s, x) => s + x.dur, 0);
     let syncTimers = [];
@@ -4432,6 +4484,7 @@ function renderLFDetail() {
   await Promise.all(loaders);
   if (GIDS.retentionMonthly !== '000000000') loadRETMonthly();
   if (GIDS.retentionHistory !== '000000000') loadRETHistory();
+  loadLastSync();  // update header timestamp to last sync time
 })();
 </script>
 </body>
