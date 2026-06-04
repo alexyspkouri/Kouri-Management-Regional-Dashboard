@@ -2550,6 +2550,7 @@ function renderVacDetail() {
       unit:        r => (r.unit || '').toLowerCase(),
       days_vacant: r => parseInt(r.days_vacant) || 0,
       available:   r => r.available || '',
+      move_out:    r => r.last_move_out || '',
     };
     const vSortFn  = vSortKey[vacSort.col] || (r => parseInt(r.days_vacant) || 0);
     const vSortDir = (vacSort.col && vSortKey[vacSort.col]) ? vacSort.dir : -1;
@@ -2557,14 +2558,15 @@ function renderVacDetail() {
       const av = vSortFn(a), bv = vSortFn(b);
       return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * vSortDir;
     });
-    colspan = 10;
+    colspan = 11;
     head = `<tr>
       ${vacTh('Property','property',null)}
       ${vacTh('Unit','unit',null)}
       <th style="text-align:center">Bed/Bath</th>
       ${vacTh('Days Vacant','days_vacant','center')}
-      ${vacTh('Move In Date','available',null)}
-      <th style="text-align:center">Inspection</th>
+      ${vacTh('Move In','available',null)}
+      ${vacTh('Move Out','move_out','center')}
+      <th style="text-align:center" title="Days from move-out to inspection">Inspection</th>
       <th style="text-align:center">Maintenance</th>
       <th style="text-align:center">Paint</th>
       <th style="text-align:center">Flooring</th>
@@ -2618,13 +2620,31 @@ function renderVacDetail() {
         return true;
       });
       if (match) {
-        const status = match.status || match.insp_type || '';
-        const dateStr = match.insp_date ? fmtDate(match.insp_date) : '';
-        const col = /complete|done|pass/i.test(status) ? '#2e7d32'
-                  : /fail|issue|incomplete/i.test(status) ? '#c62828'
-                  : /progress|scheduled|pending/i.test(status) ? '#e65100' : '#555';
-        const tooltip = [match.insp_type, match.inspector].filter(Boolean).join(' · ');
-        return `<td style="text-align:center;font-size:11px;color:${col};font-weight:600"${tooltip ? ` title="${tooltip.replace(/"/g,'&quot;')}"` : ''}>${status}${dateStr ? `<br><span style="font-size:10px;color:#999;font-weight:400">${dateStr}</span>` : ''}</td>`;
+        const status   = match.status || match.insp_type || '';
+        const inspDate = parseDate(match.insp_date);
+        const dateStr  = inspDate ? inspDate.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
+        // Color by days from move-out → inspection (speed matters)
+        let col = '#888';
+        if (inspDate && moveOutDate) {
+          const days = Math.round((inspDate - moveOutDate) / 864e5);
+          col = days <= 3  ? '#2e7d32'   // ≤3 days — great
+              : days <= 7  ? '#558b2f'   // 4-7 days — good
+              : days <= 14 ? '#e65100'   // 8-14 days — slow
+              : '#c62828';               // 15+ days — too slow
+        }
+        const tooltip = [match.insp_type, match.inspector,
+          (inspDate && moveOutDate ? Math.round((inspDate-moveOutDate)/864e5)+' days after move-out' : '')
+        ].filter(Boolean).join(' · ');
+        const statusLabel = `<span style="font-size:10px;color:#999">${status}</span>`;
+        const dateLabel   = dateStr
+          ? `<span style="font-size:13px;font-weight:700;color:${col}">${dateStr}</span>`
+          : '';
+        const inner = dateLabel + (dateLabel && statusLabel ? '<br>' : '') + statusLabel;
+        const content = match.insp_id
+          ? `<a href="https://kmcprops.appfolio.com/inspections/${match.insp_id}" target="_blank"
+               style="text-decoration:none" title="${tooltip.replace(/"/g,'&quot;')}">${inner}</a>`
+          : `<span title="${tooltip.replace(/"/g,'&quot;')}">${inner}</span>`;
+        return `<td style="text-align:center;line-height:1.4">${content}</td>`;
       }
       return mkCell(fallback);
     };
@@ -2668,12 +2688,14 @@ function renderVacDetail() {
       const floorWOs = unitWOs.filter(wo => !wIsPaint(wo) && wIsFloor(wo));
       const maintWOs = unitWOs.filter(wo => !wIsPaint(wo) && !wIsFloor(wo));
 
+      const moStr = moDate ? moDate.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
       return `<tr>
         <td>${r.property||'—'}${badgeI(r.internet)}${badgeW(r.website)}</td>
         <td style="font-size:12px;color:#555">${r.unit||'—'}</td>
         <td style="text-align:center;font-size:12px">${bedBath}</td>
         <td style="text-align:center;font-weight:700;color:${dvColor(r.days_vacant)}">${r.days_vacant||'—'}</td>
         <td style="font-size:12px;color:#2e7d32;font-weight:600">${miStr}</td>
+        <td style="text-align:center;font-size:12px;color:#555">${moStr}</td>
         ${mkInspCell(unitKey, moDate, miDate, r.inspection)}
         ${mkWOCell(maintWOs, r.maintenance)}
         ${mkWOCell(paintWOs, r.paint)}
@@ -3360,6 +3382,7 @@ async function loadLFInspections() {
     status    : r['Status']          || '',
     inspector : r['Inspector']       || '',
     notes     : r['Notes']           || '',
+    insp_id   : r['Inspection ID']   || '',
   }));
   if (ACCESS_PODS) lfInspRows = accessFilter(lfInspRows);
   console.log('[LF INSP] Rows loaded:', lfInspRows.length);
