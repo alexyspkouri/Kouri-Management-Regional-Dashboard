@@ -2827,7 +2827,7 @@ function renderVacDetail() {
 
     colspan = 10;
     head = '<tr>' +
-      '<th style="font-size:10px;color:#888;font-weight:700;text-transform:uppercase;padding:6px 8px;white-space:nowrap;max-width:160px;cursor:pointer" onclick="setVacSort('property')">Property' + vacSortArrow('property') + '</th>' +
+      vacTh('Property','property',null) +
       '<th style="text-align:center;font-size:10px;color:#888;font-weight:700;text-transform:uppercase;padding:6px 4px;width:44px">Unit</th>' +
       vacTh('Days Vacant','days_vacant','center') +
       '<th style="text-align:center;font-size:10px;color:#888;font-weight:700;text-transform:uppercase;padding:6px 8px;white-space:nowrap" title="Days from move-out to inspection">Inspection</th>' +
