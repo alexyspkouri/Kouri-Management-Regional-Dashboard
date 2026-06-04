@@ -2754,7 +2754,7 @@ function renderVacDetail() {
         const woUrl = top.service_request_id
           ? 'https://kmcprops.appfolio.com/maintenance/service_requests/' + top.service_request_id : null;
         mainLine = woUrl
-          ? '<a href="' + woUrl + '" target="_blank" style="color:#333;text-decoration:underline dotted;font-weight:600;font-size:11px" onclick="event.stopPropagation()">' + label + '</a>'
+          ? '<a href="' + woUrl + '" target="_blank" style="color:#333;text-decoration:underline dotted;font-weight:600;font-size:11px" onclick="event.stopPropagation();return true">' + label + '</a>'
           : '<span style="color:#333;font-weight:600;font-size:11px">' + label + '</span>';
         if (age) mainLine += '<span style="color:#666;font-size:10px"> · ' + age + '</span>';
         if (vendor) line2 = '<br><span style="font-size:10px;color:#555">' + vendor + '</span>';
@@ -2819,7 +2819,7 @@ function renderVacDetail() {
         const { inner, statusKey } = mkWOInner(wos, bills, fallback, alwaysShow);
         const bg = CELL_BG[statusKey] || '';
         const oid    = 'vdcell_' + vdrillId + '_' + cat;
-        const oclick = 'toggleVdetDrill(' + JSON.stringify(vdrillId) + ',' + JSON.stringify(cat) + ')';
+        const oclick = "toggleVdetDrill('" + vdrillId + "','" + cat + "')";
         const style  = 'cursor:pointer;text-align:center;line-height:1.5;padding:5px 4px;' + bg;
         return '<td id="' + oid + '" onclick="' + oclick + '" style="' + style + '">' + inner + '</td>';
       };
