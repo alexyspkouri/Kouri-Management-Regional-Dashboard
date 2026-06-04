@@ -2793,7 +2793,7 @@ function renderVacDetail() {
     };
 
     const empty = lfVacRows.length === 0 ? 'Loading…' : 'No vacant units';
-    body = vacOnly.map(r => {
+    body = vacOnly.map((r, ri) => {
       const unitKey  = `${r.property}|${normUnit(r.unit)}`;
       const miEntry  = vacMiLookup[unitKey];
       const miStr    = miEntry ? fmtDate(miEntry.str) : '—';
