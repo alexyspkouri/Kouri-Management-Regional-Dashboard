@@ -2619,9 +2619,42 @@ function renderVacDetail() {
       }
     });
 
-    // WO type classifiers (paint/flooring take priority; maintenance = everything else)
+    // WO type classifiers
     const wIsPaint = wo => /paint|repaint|touch.?up|primer/i.test(wo.service_request_desc) || /paint/i.test(wo.category);
     const wIsFloor = wo => /floor|carpet|tile|vinyl|hardwood|laminate|subfloor/i.test(wo.service_request_desc) || /floor|carpet|tile/i.test(wo.category);
+
+    // Bill categorizer + lookup for vdet (same rules as cost view)
+    const vBillHay = b => (b.description||'') + ' ' + (b.gl_account||'') + ' ' + (b.vendor||'');
+    const vBillCat = b => {
+      const gl = (b.gl_account||'').toLowerCase();
+      if (/turnover clean|carpet clean|move.?out clean|housekeep|janitorial/.test(gl)) return 'clean';
+      if (/management charge|labour|labor/.test(gl)) return 'maint';
+      if (/utility|electric|gas unit/.test(gl)) return 'other';
+      const h = vBillHay(b).toLowerCase();
+      if (/paint|repaint|touch.?up|primer|drywall|patch|texture/.test(h)) return 'paint';
+      if (/floor|tile|vinyl|hardwood|laminate|lvp|lvt|subfloor|rug/.test(h)) return 'floor';
+      if (/carpet/.test(h) && !/clean/.test(h)) return 'floor';
+      if (/clean|housekeep|janitorial|deep clean|move.?out|turnover|saniti/.test(h)) return 'clean';
+      return 'maint';
+    };
+    const billsByUnitCat = {};
+    lfTurnCostRows.forEach(b => {
+      if (!b.unit || !b.amount) return;
+      const bd = parseDate(b.bill_date); if (!bd) return;
+      const uk  = b.property + '|' + normUnit(b.unit);
+      const cat = vBillCat(b);
+      const key = uk + '|' + cat;
+      if (!billsByUnitCat[key]) billsByUnitCat[key] = [];
+      billsByUnitCat[key].push({...b, _date: bd});
+    });
+    const getUnitBills = (unitKey, cat, moDate, miDate) => {
+      const windowStart = moDate ? new Date(moDate.getTime() - 7*864e5) : null;
+      return (billsByUnitCat[unitKey + '|' + cat] || []).filter(b => {
+        if (windowStart && b._date < windowStart) return false;
+        if (miDate && b._date > miDate) return false;
+        return true;
+      });
+    };
 
     // Inspection cell: best match within ±30 days of move-out and before move-in.
     // Falls back to make-ready field.
@@ -2665,28 +2698,90 @@ function renderVacDetail() {
       return mkCell(fallback);
     };
 
-    // Work order cell: shows open WOs from the vacancy window for a given type bucket.
-    // Falls back to make-ready field if no qualifying WOs.
-    const mkWOCell = (typeWOs, fallback) => {
-      if (!typeWOs.length) return mkCell(fallback);
-      // Sort by most recent first
-      typeWOs.sort((a, b) => (a.days === null ? 999 : a.days) - (b.days === null ? 999 : b.days));
-      const top = typeWOs[0];
-      const desc = top.service_request_desc || top.category || 'Open WO';
-      const short = desc.length > 24 ? desc.slice(0, 24) + '…' : desc;
-      const label = typeWOs.length === 1 ? short : `${typeWOs.length} open WOs`;
-      const age   = top.days !== null && top.days !== undefined ? `${top.days}d ago` : '';
-      const tipLines = typeWOs.map(w => {
-        const d = w.service_request_desc || w.category || 'Open WO';
-        return d + (w.days !== null ? ` (${w.days}d)` : '');
-      }).join('\n');
-      const woUrl = top.service_request_id
-        ? `https://kmcprops.appfolio.com/maintenance/service_requests/${top.service_request_id}`
-        : null;
-      const labelEl = woUrl
-        ? `<a href="${woUrl}" target="_blank" style="color:#b45309;text-decoration:underline dotted;font-weight:600">${label}</a>`
-        : `<span style="color:#b45309;font-weight:600">${label}</span>`;
-      return `<td style="text-align:center;font-size:11px" title="${tipLines.replace(/"/g,'&quot;')}">${labelEl}${age ? `<br><span style="font-size:10px;color:#999;font-weight:400">${age}</span>` : ''}</td>`;
+    // Work order + bill cell with status color-coding:
+    //   Green  = Done   (bill exists + no open WO, OR WO is completed + bill)
+    //   Yellow = Partial (WO open/in-progress + bill exists)
+    //   Red    = Not Done (WO open, no bill)
+    //   Gray   = NA (paint/flooring with no WO and no bill)
+    //   Gray   = No Activity (maint/cleaning with no WO and no bill)
+    const WO_DONE_RE = /work done|completed|done|complete/i;
+    const getCellStatus = (typeWOs, catBills) => {
+      const hasBill = catBills.length > 0;
+      const hasWO   = typeWOs.length > 0;
+      if (!hasWO && !hasBill) return 'none';
+      if (!hasWO &&  hasBill) return 'done';      // billed = work done
+      const allDone = typeWOs.every(wo => WO_DONE_RE.test(wo.status || ''));
+      if (allDone  &&  hasBill) return 'done';    // WO done + billed
+      if (allDone  && !hasBill) return 'done';    // WO marked done (no bill yet)
+      if (!allDone &&  hasBill) return 'partial'; // in progress + billed
+      return 'not_done';                          // WO open, nothing billed
+    };
+    const CELL_STYLES = {
+      done:     { bg: '#e8f5e9', border: '#2e7d32', pill: '#2e7d32', pillBg: '#c8e6c9', label: '✓ Done'     },
+      partial:  { bg: '#fff8e1', border: '#f9a825', pill: '#e65100', pillBg: '#fff3e0', label: '~ Partial'  },
+      not_done: { bg: '#ffebee', border: '#e57373', pill: '#c62828', pillBg: '#ffcdd2', label: '✗ Not Done' },
+      none:     { bg: 'transparent', border: 'transparent', pill: '#bbb', pillBg: '#f5f5f5', label: 'NA'   },
+    };
+
+    const mkWOCell = (typeWOs, catBills, fallback, alwaysShow) => {
+      const hasBill    = catBills.length > 0;
+      const hasWO      = typeWOs.length > 0;
+      const statusKey  = getCellStatus(typeWOs, catBills);
+      const cs         = CELL_STYLES[statusKey];
+      const fmtAmt2    = v => v > 0 ? '$' + v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) : '';
+      const billTotal  = catBills.reduce((s, b) => s + b.amount, 0);
+      const billVendors = [...new Set(catBills.map(b => b.vendor).filter(Boolean))].slice(0,2).join(', ');
+      const billAmtStr = fmtAmt2(billTotal);
+
+      // No activity
+      if (!hasWO && !hasBill) {
+        if (!alwaysShow) return '<td style="text-align:center;color:#bbb;font-size:11px">—</td>';
+        return '<td style="text-align:center;background:#fafafa;line-height:1.5;padding:6px 4px">' +
+          '<span style="font-size:10px;color:#bbb">No Activity</span></td>';
+      }
+
+      // Build content lines
+      let mainLine = '', line2 = '', line3 = '';
+
+      if (hasWO) {
+        typeWOs.sort((a, b) => (a.days === null ? 999 : a.days) - (b.days === null ? 999 : b.days));
+        const top    = typeWOs[0];
+        const desc   = top.service_request_desc || top.category || 'Open WO';
+        const short  = desc.length > 24 ? desc.slice(0,24) + '…' : desc;
+        const label  = typeWOs.length === 1 ? short : typeWOs.length + ' WOs';
+        const age    = top.days != null ? top.days + 'd' : '';
+        const vendor = top.vendor || '';
+        const woUrl  = top.service_request_id
+          ? 'https://kmcprops.appfolio.com/maintenance/service_requests/' + top.service_request_id : null;
+        mainLine = woUrl
+          ? '<a href="' + woUrl + '" target="_blank" style="color:#333;text-decoration:underline dotted;font-weight:600;font-size:11px">' + label + '</a>'
+          : '<span style="color:#333;font-weight:600;font-size:11px">' + label + '</span>';
+        if (age) mainLine += '<span style="color:#888;font-size:10px"> · ' + age + '</span>';
+        if (vendor) line2 = '<br><span style="font-size:10px;color:#777">' + vendor + '</span>';
+      } else {
+        // Bill-only
+        const bd   = catBills[0].description || catBills[0].gl_account || 'Bill';
+        const bshort = bd.length > 24 ? bd.slice(0,24) + '…' : bd;
+        const blabel = catBills.length > 1 ? catBills.length + ' bills' : bshort;
+        mainLine = '<span style="color:#333;font-weight:600;font-size:11px">' + blabel + '</span>';
+        if (billVendors) line2 = '<br><span style="font-size:10px;color:#777">' + billVendors + '</span>';
+      }
+
+      if (billAmtStr) line3 = '<br><span style="font-size:11px;color:#2e7d32;font-weight:700">' + billAmtStr + '</span>';
+
+      // Status pill
+      const pill = '<span style="display:inline-block;background:' + cs.pillBg + ';color:' + cs.pill + ';font-size:9px;font-weight:700;border-radius:3px;padding:1px 5px;margin-top:3px">' + cs.label + '</span>';
+
+      // Tooltip
+      const tipParts = [];
+      if (hasWO) tipParts.push((typeWOs[0].service_request_desc||'WO') + ' · ' + (typeWOs[0].status||''));
+      if (hasWO && typeWOs[0].vendor) tipParts.push(typeWOs[0].vendor);
+      if (hasBill) tipParts.push('Billed: ' + billAmtStr + (billVendors ? ' · ' + billVendors : ''));
+      const tip = tipParts.join(' | ');
+
+      return '<td style="text-align:center;line-height:1.5;padding:5px 4px;background:' + cs.bg +
+        ';border-left:3px solid ' + cs.border + '" title="' + tip.replace(/"/g,'&quot;') + '">' +
+        mainLine + line2 + line3 + '<br>' + pill + '</td>';
     };
 
     const empty = lfVacRows.length === 0 ? 'Loading…' : 'No vacant units';
@@ -2711,6 +2806,10 @@ function renderVacDetail() {
       const paintWOs = unitWOs.filter(wIsPaint);
       const floorWOs = unitWOs.filter(wo => !wIsPaint(wo) && wIsFloor(wo));
       const maintWOs = unitWOs.filter(wo => !wIsPaint(wo) && !wIsFloor(wo));
+      const maintBills = getUnitBills(unitKey, 'maint', moDate, miDate);
+      const paintBills = getUnitBills(unitKey, 'paint', moDate, miDate);
+      const floorBills = getUnitBills(unitKey, 'floor', moDate, miDate);
+      const cleanBills = getUnitBills(unitKey, 'clean', moDate, miDate);
 
       const moStr = moDate ? moDate.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
       return `<tr>
@@ -2721,10 +2820,10 @@ function renderVacDetail() {
         <td style="font-size:12px;color:#2e7d32;font-weight:600">${miStr}</td>
         <td style="text-align:center;font-size:12px;color:#555">${moStr}</td>
         ${mkInspCell(unitKey, moDate, miDate, r.inspection)}
-        ${mkWOCell(maintWOs, r.maintenance)}
-        ${mkWOCell(paintWOs, r.paint)}
-        ${mkWOCell(floorWOs, r.flooring)}
-        <td style="text-align:center;color:#bbb">—</td>
+        ${mkWOCell(maintWOs, maintBills, r.maintenance, true)}
+        ${mkWOCell(paintWOs, paintBills, r.paint, false)}
+        ${mkWOCell(floorWOs, floorBills, r.flooring, false)}
+        ${mkWOCell([], cleanBills, r.cleaning, true)}
       </tr>`;
     }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
   }
