@@ -2559,7 +2559,9 @@ function renderVacDetail() {
       maint_status: r => r.maintenance || '',
       paint_status: r => r.paint || '',
       floor_status: r => r.flooring || '',
-      clean_status: r => r.cleaning || '',
+      clean_status:   r => r.cleaning || '',
+      remodel_status:   r => '',
+      appliance_status: r => '',
     };
     const vSortFn  = vSortKey[vacSort.col] || (r => parseInt(r.days_vacant) || 0);
     const vSortDir = (vacSort.col && vSortKey[vacSort.col]) ? vacSort.dir : -1;
@@ -2567,7 +2569,7 @@ function renderVacDetail() {
       const av = vSortFn(a), bv = vSortFn(b);
       return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * vSortDir;
     });
-    colspan = 11;
+    colspan = 13;
     head = `<tr>
       ${vacTh('Property','property',null)}
       ${vacTh('Unit','unit',null)}
@@ -2580,6 +2582,8 @@ function renderVacDetail() {
       ${vacTh('Paint','paint_status','center')}
       ${vacTh('Flooring','floor_status','center')}
       ${vacTh('Cleaning','clean_status','center')}
+      ${vacTh('Remodel','remodel_status','center')}
+      ${vacTh('Appliances','appliance_status','center')}
     </tr>`;
 
     // Build scheduled move-in lookup: property|normUnit → { date, str }
@@ -2626,15 +2630,19 @@ function renderVacDetail() {
     // Bill categorizer + lookup for vdet (same rules as cost view)
     const vBillHay = b => (b.description||'') + ' ' + (b.gl_account||'') + ' ' + (b.vendor||'');
     const vBillCat = b => {
-      const gl = (b.gl_account||'').toLowerCase();
+      const gl  = (b.gl_account||'').toLowerCase();
+      const ven = (b.vendor||'').toLowerCase();
       if (/turnover clean|carpet clean|move.?out clean|housekeep|janitorial/.test(gl)) return 'clean';
-      if (/management charge|labour|labor/.test(gl)) return 'maint';
-      if (/utility|electric|gas unit/.test(gl)) return 'other';
+      if (/management charge|labour|labor|drain/.test(gl)) return 'maint';
+      if (/utility|electric|gas unit|junk removal|trash removal/.test(gl)) return 'other';
+      if (/remodel|general repairs/.test(gl)) return 'remodel';
       const h = vBillHay(b).toLowerCase();
       if (/paint|repaint|touch.?up|primer|drywall|patch|texture/.test(h)) return 'paint';
       if (/floor|tile|vinyl|hardwood|laminate|lvp|lvt|subfloor|rug/.test(h)) return 'floor';
       if (/carpet/.test(h) && !/clean/.test(h)) return 'floor';
       if (/clean|housekeep|janitorial|deep clean|move.?out|turnover|saniti/.test(h)) return 'clean';
+      if (/drain/.test(h)) return 'maint';
+      if (!/kouri/.test(ven)) return 'remodel';  // external vendor
       return 'maint';
     };
     const billsByUnitCat = {};
@@ -2806,10 +2814,12 @@ function renderVacDetail() {
       const paintWOs = unitWOs.filter(wIsPaint);
       const floorWOs = unitWOs.filter(wo => !wIsPaint(wo) && wIsFloor(wo));
       const maintWOs = unitWOs.filter(wo => !wIsPaint(wo) && !wIsFloor(wo));
-      const maintBills = getUnitBills(unitKey, 'maint', moDate, miDate);
-      const paintBills = getUnitBills(unitKey, 'paint', moDate, miDate);
-      const floorBills = getUnitBills(unitKey, 'floor', moDate, miDate);
-      const cleanBills = getUnitBills(unitKey, 'clean', moDate, miDate);
+      const maintBills   = getUnitBills(unitKey, 'maint',   moDate, miDate);
+      const paintBills   = getUnitBills(unitKey, 'paint',   moDate, miDate);
+      const floorBills   = getUnitBills(unitKey, 'floor',   moDate, miDate);
+      const cleanBills   = getUnitBills(unitKey, 'clean',   moDate, miDate);
+      const remodelBills   = getUnitBills(unitKey, 'remodel',   moDate, miDate);
+      const applianceBills = getUnitBills(unitKey, 'appliance', moDate, miDate);
 
       const moStr = moDate ? moDate.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
       return `<tr>
@@ -2824,6 +2834,8 @@ function renderVacDetail() {
         ${mkWOCell(paintWOs, paintBills, r.paint, false)}
         ${mkWOCell(floorWOs, floorBills, r.flooring, false)}
         ${mkWOCell([], cleanBills, r.cleaning, true)}
+        ${mkWOCell([], remodelBills, '', false)}
+        ${mkWOCell([], applianceBills, '', false)}
       </tr>`;
     }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
   }
@@ -2841,24 +2853,27 @@ function renderVacDetail() {
     const haystack = b => `${b.description||''} ${b.gl_account||''} ${b.vendor||''}`.toLowerCase();
     // GL account overrides — checked before any keyword rules
     const cIsCleanGL  = b => /turnover clean|carpet clean|move.?out clean|unit clean|housekeep|janitorial/i.test((b.gl_account||'').toLowerCase());
-    const cIsMaintGL  = b => /management charge|labour|labor/i.test((b.gl_account||'').toLowerCase());
-    const cIsOtherGL  = b => /utility|electric|gas unit/i.test((b.gl_account||'').toLowerCase());
+    const cIsMaintGL  = b => /management charge|labour|labor|drain/i.test((b.gl_account||'').toLowerCase());
+    const cIsOtherGL  = b => /utility|electric|gas unit|junk removal|trash removal/i.test((b.gl_account||'').toLowerCase());
+    const cIsRemodel  = b => /remodel|general repairs/i.test((b.gl_account||'').toLowerCase());
+    const cIsKouriVen = b => /kouri/i.test((b.vendor||'').toLowerCase());
     const cIsPaint    = b => /paint|repaint|touch.?up|primer|drywall|patch|texture/i.test(haystack(b));
-    // Flooring: carpet only counts if it's NOT paired with "clean" in the same text
     const cIsFloor    = b => /floor|tile|vinyl|hardwood|laminate|lvp|lvt|subfloor|rug/i.test(haystack(b)) ||
                              (/carpet/i.test(haystack(b)) && !/clean/i.test(haystack(b)));
     const cIsClean    = b => /clean|housekeep|janitorial|deep clean|move.?out|turnover|saniti/i.test(haystack(b));
     const cIsInspect  = b => /inspect|punch.?list|assessment|walk.?through|make.?ready check/i.test(haystack(b));
     const cIsApplianc = b => /appliance|stove|oven|fridge|refrigerator|dishwasher|washer|dryer|hvac|furnace|water heat/i.test(haystack(b));
     const categorize  = b => {
-      if (cIsCleanGL(b))  return 'clean';   // GL account overrides — always win
-      if (cIsMaintGL(b))  return 'maint';
-      if (cIsOtherGL(b))  return 'appliance';  // utilities → Other bucket
+      if (cIsCleanGL(b))  return 'clean';    // GL overrides — always win
+      if (cIsMaintGL(b))  return 'maint';    // Kouri labor/mgmt charges
+      if (cIsOtherGL(b))  return 'appliance';
+      if (cIsRemodel(b))  return 'remodel';  // explicit remodel GL accounts
       if (cIsPaint(b))    return 'paint';
       if (cIsFloor(b))    return 'floor';
       if (cIsClean(b))    return 'clean';
       if (cIsInspect(b))  return 'inspect';
       if (cIsApplianc(b)) return 'appliance';
+      if (!cIsKouriVen(b)) return 'remodel'; // external vendor = remodel
       return 'maint';
     };
 
@@ -2904,9 +2919,10 @@ function renderVacDetail() {
       const sum    = cat => bills.filter(b => b._cat === cat).reduce((s, b) => s + b.amount, 0);
       return {
         r, bills,
-        total: bills.reduce((s, b) => s + b.amount, 0),
-        maint: sum('maint'), paint: sum('paint'), floor: sum('floor'),
-        clean: sum('clean'), other: sum('inspect') + sum('appliance'),
+        total:   bills.reduce((s, b) => s + b.amount, 0),
+        maint:     sum('maint'), paint: sum('paint'), floor: sum('floor'),
+        clean:     sum('clean'), remodel: sum('remodel'),
+        appliance: sum('appliance'), other: sum('inspect'),
       };
     });
 
@@ -2919,8 +2935,10 @@ function renderVacDetail() {
       cost_maint: x => x.maint,
       cost_paint: x => x.paint,
       cost_floor: x => x.floor,
-      cost_clean: x => x.clean,
-      cost_other: x => x.other,
+      cost_clean:   x => x.clean,
+      cost_remodel:   x => x.remodel,
+      cost_appliance: x => x.appliance,
+      cost_other:     x => x.other,
     };
     const cSortFn = costSortMap[vacSort.col] || (x => parseInt(x.r.days_vacant)||0);
     const cSortDir = (vacSort.col && costSortMap[vacSort.col]) ? vacSort.dir : -1;
@@ -2929,7 +2947,7 @@ function renderVacDetail() {
       return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * cSortDir;
     });
 
-    colspan = 10;
+    colspan = 12;
     head = '<tr>' +
       vacTh('Property','property',null) +
       '<th style="text-align:center;font-size:10px;color:#888;font-weight:700;text-transform:uppercase;padding:6px 4px;width:44px">Unit</th>' +
@@ -2940,6 +2958,8 @@ function renderVacDetail() {
       vacTh('Paint','cost_paint','right') +
       vacTh('Floor','cost_floor','right') +
       vacTh('Clean','cost_clean','right') +
+      vacTh('Remodel','cost_remodel','right') +
+      vacTh('Appliances','cost_appliance','right') +
       vacTh('Other','cost_other','right') +
       '</tr>';
 
@@ -2957,7 +2977,7 @@ function renderVacDetail() {
         ' onclick="toggleCostDrill(\'' + drillId + '\',\'' + cat + '\')">' + fmtCost(v) + '</td>';
     };
 
-    body = vacOnly2.map(({ r, bills, total, maint, paint, floor, clean, other }, ri) => {
+    body = vacOnly2.map(({ r, bills, total, maint, paint, floor, clean, remodel, appliance, other }, ri) => {
       const drillId = 'cd_' + ri;
       window._costDrillData[drillId] = bills;
       const noBills = bills.length === 0;
@@ -2993,10 +3013,10 @@ function renderVacDetail() {
         (noBills
           ? '<td style="text-align:right;color:#bbb;font-size:11px" colspan="6">no bills found</td>'
           : drillCell(total,'cd_'+ri,'all') + drillCell(maint,'cd_'+ri,'maint') + drillCell(paint,'cd_'+ri,'paint') +
-            drillCell(floor,'cd_'+ri,'floor') + drillCell(clean,'cd_'+ri,'clean') + drillCell(other,'cd_'+ri,'other')) +
+            drillCell(floor,'cd_'+ri,'floor') + drillCell(clean,'cd_'+ri,'clean') + drillCell(remodel,'cd_'+ri,'remodel') + drillCell(appliance,'cd_'+ri,'appliance') + drillCell(other,'cd_'+ri,'other')) +
         '</tr>' +
         '<tr id="drill_' + drillId + '" style="display:none;background:#f8fbff">' +
-          '<td colspan="10" style="padding:0;border-bottom:2px solid #1565c0">' +
+          '<td colspan="12" style="padding:0;border-bottom:2px solid #1565c0">' +
             '<div id="drillcontent_' + drillId + '" style="padding:10px 18px 14px"></div>' +
           '</td>' +
         '</tr>';
@@ -3069,7 +3089,7 @@ function toggleCostDrill(drillId, cat) {
   filtered.sort((a, b) => (b._date ? b._date.getTime() : 0) - (a._date ? a._date.getTime() : 0));
 
   const catLabel = { all:'All Bills', maint:'Maintenance', paint:'Paint / Drywall',
-                     floor:'Flooring', clean:'Cleaning', other:'Appliances & Inspections' };
+                     floor:'Flooring', clean:'Cleaning', remodel:'Remodel', appliance:'Appliances', other:'Other' };
   const fmtD = d => d ? d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
   const fmtA = v => '$' + Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 
