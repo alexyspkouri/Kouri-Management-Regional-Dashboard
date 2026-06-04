@@ -2849,10 +2849,30 @@ function renderVacDetail() {
       const drillId = 'cd_' + ri;
       window._costDrillData[drillId] = bills;
       const noBills = bills.length === 0;
-      const moDate2  = parseDate(r.last_move_out);
-      const miDate2  = costMiLookup[r.property + '|' + normUnit(r.unit)] || null;
-      const unitKey2 = r.property + '|' + normUnit(r.unit);
-      const inspCell = mkInspCell(unitKey2, moDate2, miDate2, r.inspection);
+      const moDate2   = parseDate(r.last_move_out);
+      const unitKey2  = r.property + '|' + normUnit(r.unit);
+      // Inline inspection lookup for cost view
+      const inspCandidates = (lfInspRows || []).filter(ir =>
+        ir.property === r.property && normUnit(ir.unit) === normUnit(r.unit)
+      );
+      const inspMatch = inspCandidates.find(ir => {
+        const id = parseDate(ir.insp_date);
+        if (!id || !moDate2) return false;
+        return Math.abs((id.getTime() - moDate2.getTime()) / 864e5) <= 30;
+      });
+      let inspCell = '<td style="text-align:center;color:#bbb;font-size:11px">—</td>';
+      if (inspMatch) {
+        const iDate = parseDate(inspMatch.insp_date);
+        const days  = moDate2 && iDate ? Math.round((iDate - moDate2) / 864e5) : null;
+        const iCol  = days === null ? '#888' : days <= 3 ? '#2e7d32' : days <= 7 ? '#558b2f' : days <= 14 ? '#e65100' : '#c62828';
+        const iStr  = iDate ? iDate.toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
+        const iTip  = (days !== null ? days + ' days after move-out' : '') + (inspMatch.inspector ? ' · ' + inspMatch.inspector : '');
+        const iInner = '<span style="font-size:13px;font-weight:700;color:' + iCol + '">' + iStr + '</span>' +
+          (inspMatch.status ? '<br><span style="font-size:10px;color:#999">' + inspMatch.status + '</span>' : '');
+        inspCell = inspMatch.insp_id
+          ? '<td style="text-align:center;line-height:1.4"><a href="https://kmcprops.appfolio.com/inspections/' + inspMatch.insp_id + '" target="_blank" style="text-decoration:none" title="' + iTip + '">' + iInner + '</a></td>'
+          : '<td style="text-align:center;line-height:1.4" title="' + iTip + '">' + iInner + '</td>';
+      }
       return '<tr id="crow_' + drillId + '">' +
         '<td style="font-size:12px">' + (r.property||'—') + '</td>' +
         '<td style="font-size:11px;color:#888;text-align:center;white-space:nowrap;padding:6px 4px">' + (r.unit||'—') + '</td>' +
