@@ -2612,15 +2612,15 @@ function renderVacDetail() {
       const av = vSortFn(a), bv = vSortFn(b);
       return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * vSortDir;
     });
-    colspan = 15;
+    colspan = 14;
     head = `<tr>
       ${vacTh('Property','property',null)}
       ${vacTh('Unit','unit',null)}
       <th style="text-align:center">Bed/Bath</th>
+      ${vacTh('Move Out','move_out','center')}
       ${vacTh('Days Vacant','days_vacant','center')}
       ${vacTh('Vac Cost','vac_cost','right')}
       ${vacTh('Move In','available',null)}
-      ${vacTh('Move Out','move_out','center')}
       ${vacTh('Inspection','insp_date','center')}
       ${vacTh('Total Cost','total_cost','right')}
       ${vacTh('Maintenance','maint_status','center')}
@@ -3087,7 +3087,7 @@ function renderVacDetail() {
             const vc=mr&&dv?dv*(mr/30):0;
             const totalInvest=u.total+vc;
             if (!lr) return '<td style="text-align:right;font-size:10px;color:#aaa">N/A</td>';
-            if (!nr||!totalInvest||nr<=lr) return '<td style="text-align:right;color:#bbb">—</td>';
+            if (!nr||!totalInvest) return '<td style="text-align:right;color:#bbb">—</td>';
             const roi=Math.round((nr-lr)*12/totalInvest*100);
             const col=roi>=100?'#2e7d32':roi>=50?'#e65100':'#6a1b9a';
             return '<td style="text-align:right;font-weight:700;color:'+col+';font-size:12px">'+roi+'%</td>';
@@ -3185,8 +3185,8 @@ function renderVacDetail() {
         <td style="text-align:center;font-size:12px">${bedBath}</td>
         <td style="text-align:center;font-weight:700;color:${dvColor(r.days_vacant)}">${r.days_vacant||'—'}</td>
         <td style="text-align:right;font-weight:700;color:#8b4513">${(()=>{ const dv=parseInt(r.days_vacant)||0,mr=parseFloat(r.market_rent)||0; return dv&&mr?'$'+(dv*(mr/30)).toLocaleString('en-US',{maximumFractionDigits:0}):'—'; })()}</td>
-        <td style="font-size:12px;color:#2e7d32;font-weight:600">${miStr}</td>
         <td style="text-align:center;font-size:12px;color:#555">${moStr}</td>
+        <td style="font-size:12px;color:#2e7d32;font-weight:600">${miStr}</td>
         ${mkInspCell(unitKey, moDate, miDate, r.inspection)}` +
         mkVdCellTotal(allBills) +
         mkVdCell(maintWOs,     maintBills,     r.maintenance, true,  'maint') +
@@ -3195,15 +3195,15 @@ function renderVacDetail() {
         mkVdCell([],           remodelBills,   '',            false, 'remodel') +
         mkVdCell(applianceWOs, applianceBills, '',            false, 'appliance') +
         mkVdCell(cleanWOs,     cleanBills,     r.cleaning,    true,  'clean') +
-        (()=>{ const lr=parseFloat(r.last_rent)||0; if(!lr) return '<td style="text-align:right;font-size:10px;color:#aaa">N/A</td>'; const nr=parseFloat(r.schd_rent)||parseFloat(r.market_rent)||0; const bills=[...maintBills,...paintBills,...floorBills,...cleanBills,...remodelBills,...applianceBills]; const tc=bills.reduce((s,b)=>s+b.amount,0); const vc=(parseFloat(r.market_rent)||0)*(parseInt(r.days_vacant)||0)/30; const totalInvest=tc+vc; if(!nr||nr<=lr||!totalInvest) return '<td style="text-align:right;color:#bbb">—</td>'; const roi=Math.round((nr-lr)*12/totalInvest*100); const col=roi>=100?'#2e7d32':roi>=50?'#e65100':'#6a1b9a'; return '<td style="text-align:right;font-weight:700;color:'+col+';font-size:12px">'+roi+'%</td>'; })() +
+
         '</tr>' +
         '<tr id="vdrill_' + vdrillId + '" style="display:none;background:#f8fbff">' +
-          '<td colspan="15" style="padding:0;border-bottom:2px solid #1565c0">' +
+          '<td colspan="14" style="padding:0;border-bottom:2px solid #1565c0">' +
             '<div id="vdrillcontent_' + vdrillId + '"></div>' +
           '</td>' +
         '</tr>';
     }).join('') || `<tr><td colspan="${colspan}" style="text-align:center;color:#aaa;padding:24px">${empty}</td></tr>`;
-  }
+  }  // close else block
 
 
 
