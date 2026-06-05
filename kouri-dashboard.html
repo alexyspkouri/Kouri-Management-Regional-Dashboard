@@ -911,6 +911,10 @@ tbody td { padding: 6px 8px; color: #333; font-size: 12px; }
             <div class="chip"   id="vac-vs-cost" onclick="setVacView('cost')">💰 Turn Cost</div>
             <div class="chip"   id="vac-vs-trend" onclick="setVacView('trend')">📈 Trend</div>
           </div>
+          <div id="vac-cost-ctrl" style="display:none;margin-left:auto;display:flex;gap:6px">
+            <button onclick="collapseAllCost()" style="font-size:11px;padding:3px 10px;border:1px solid #ddd;border-radius:12px;background:white;cursor:pointer;color:#555">⊖ Collapse All</button>
+          </div>
+          </div>
         </div>
         <div class="tbl-wrap" id="vac-detail-wrap">
           <table id="vac-detail-table">
@@ -2359,6 +2363,15 @@ function toggleCostProp(pi) {
   else _costExpandedProps.add(pi);
   renderVacDetail();
 }
+function collapseAllCost() {
+  _costExpandedProps.clear();
+  if (_openVdetDrill) { closeVdetDrill(_openVdetDrill); _openVdetDrill = null; }
+  renderVacDetail();
+}
+function expandAllCost(propList) {
+  propList.forEach((p,i) => _costExpandedProps.add(i));
+  renderVacDetail();
+}
 function setVacSort(col) {
   vacSort.dir = vacSort.col === col ? -vacSort.dir : 1;
   vacSort.col = col;
@@ -2877,13 +2890,15 @@ function renderVacDetail() {
     }).sort((a,b) => b.total - a.total);
 
     const fmtA = v => v > 0 ? '$' + v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) : '—';
-    const NCols = 11;
+    const NCols = 13;
     colspan = NCols;
 
     head = '<tr>' +
       '<th style="width:16px"></th>' +
-      '<th>Unit</th>' +
-      '<th style="text-align:center">Status</th>' +
+      vacTh('Unit','unit',null) +
+      vacTh('Move Out','move_out','center') +
+      vacTh('Days','days_vacant','center') +
+      vacTh('Move In','available','center') +
       vacTh('Inspection','insp_date','center') +
       vacTh('Total','cost_total','right') +
       vacTh('Maint','cost_maint','right') +
@@ -2901,9 +2916,15 @@ function renderVacDetail() {
       const expanded = _costExpandedProps.has(pi);
       const n = pg.units.length || 1;
       const avgCat = cat => { const t = pg.units.reduce((s,u)=>s+(u[cat]||0),0); return t>0 ? fmtA(t/n) : '—'; };
+      // Per-category averages (only units with spend > 0 to avoid skewing by zero-cost units)
+      const propCatAvg = {};
+      ['maint','paint','floor','remodel','appliance','clean','total'].forEach(cat => {
+        const vals = pg.units.map(u => u[cat]||0).filter(v => v > 0);
+        propCatAvg[cat] = vals.length ? vals.reduce((s,v)=>s+v,0)/vals.length : 0;
+      });
       const propRow = '<tr style="background:#e8ecf0;cursor:pointer" onclick="toggleCostProp(' + pi + ')">' +
         '<td style="font-size:13px;text-align:center;color:#555">' + (expanded ? '▼' : '▶') + '</td>' +
-        '<td colspan="3" style="font-weight:700;font-size:13px">' + pg.prop +
+        '<td colspan="5" style="font-weight:700;font-size:13px">' + pg.prop +
           '<span style="font-size:11px;color:#888;font-weight:400;margin-left:8px">' + pg.units.length + ' unit' + (pg.units.length!==1?'s':'') + '</span></td>' +
         '<td style="text-align:right;font-weight:700;color:#1565c0;font-size:12px">' + fmtA(pg.total) + '<br><span style="font-size:9px;color:#888;font-weight:400">avg: ' + fmtA(pg.avg) + '</span></td>' +
         '<td style="text-align:right;font-size:10px;color:#666">' + avgCat('maint') + '</td>' +
@@ -2921,12 +2942,27 @@ function renderVacDetail() {
         window._costDrillData[drillId] = u.bills;
 
         const isVacant = u.vacRow && /vacant/i.test(u.vacRow.unit_status);
-        const badge = isVacant
-          ? '<span style="background:#ffebee;color:#c62828;font-size:9px;font-weight:700;border-radius:3px;padding:1px 5px">VACANT</span>'
-          : '<span style="background:#e8f5e9;color:#2e7d32;font-size:9px;font-weight:700;border-radius:3px;padding:1px 5px">TURNED</span>';
+        // Date cells
+        const fmtShort = d => d ? d.toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '—';
+        const moStr   = fmtShort(u.moDate);
+        const miDate2 = u.miDate;
+        const miStr   = fmtShort(miDate2);
+        // Days: vacant units use days_vacant, turned units show turn duration
+        let daysStr = '—', daysCol = '#555';
+        if (u.vacRow && u.vacRow.days_vacant) {
+          const dv = parseInt(u.vacRow.days_vacant) || 0;
+          daysStr = dv + 'd';
+          daysCol = dv > 45 ? '#b71c1c' : dv > 30 ? '#c62828' : dv > 14 ? '#e65100' : '#2e7d32';
+        } else if (u.moDate && miDate2) {
+          const dur = Math.round((miDate2 - u.moDate) / 864e5);
+          if (dur >= 0) { daysStr = dur + 'd'; daysCol = dur > 45 ? '#b71c1c' : dur > 30 ? '#c62828' : dur > 14 ? '#e65100' : '#2e7d32'; }
+        } else if (u.moDate && u.bills.length) {
+          const lastBill = u.bills.reduce((m,b) => b._date > m ? b._date : m, u.moDate);
+          const dur = Math.round((lastBill - u.moDate) / 864e5);
+          if (dur > 0) { daysStr = '~' + dur + 'd'; daysCol = '#888'; }
+        }
 
-        const moDate2 = u.moDate, miDate2 = u.miDate;
-        const inspCell = mkInspCell(u.unitKey, moDate2, miDate2, u.vacRow ? u.vacRow.inspection : '');
+        const inspCell = mkInspCell(u.unitKey, u.moDate, u.miDate, u.vacRow ? u.vacRow.inspection : '');
 
         // Get WOs for this unit
         const unitId = u.vacRow ? (u.vacRow.unit_id||'') : '';
@@ -2950,22 +2986,33 @@ function renderVacDetail() {
 
         const mkCostCellCost = (val, cat) => {
           if (!val) return '<td style="text-align:right;color:#bbb">—</td>';
-          const catBills = u.bills.filter(b=>b._cat===cat);
-          const catWOs   = unitWOs.filter(wo=>woCat(wo)===cat);
-          const sk = getCellStatus(catWOs, catBills);
-          const bgStyle = CELL_BG[sk] || '';
+          // Comparative coloring: green=below avg, yellow=near avg, red=above avg
+          const avg   = propCatAvg[cat] || 0;
+          let bg = '';
+          if (val > 0 && avg > 0) {
+            const ratio = val / avg;
+            bg = ratio < 0.8 ? 'background:#c8e6c9;'   // green — below avg
+               : ratio < 1.25 ? 'background:#fff9c4;'   // yellow — near avg
+               : 'background:#ffcdd2;';                  // red — above avg
+          }
           const oid = 'vdcell_' + drillId + '_' + cat;
-          return '<td id="' + oid + '" data-drill="' + drillId + '" data-cat="' + cat + '" onclick="toggleVdetDrill(this.dataset.drill,this.dataset.cat)" style="text-align:right;font-weight:700;color:#222;cursor:pointer;text-decoration:underline dotted;' + bgStyle + '">' + fmtCost(val) + '</td>';
+          return '<td id="' + oid + '" data-drill="' + drillId + '" data-cat="' + cat + '" onclick="toggleVdetDrill(this.dataset.drill,this.dataset.cat)" style="text-align:right;font-weight:700;color:#222;cursor:pointer;text-decoration:underline dotted;' + bg + '">' + fmtCost(val) + '</td>';
         };
 
+        const totAvg   = propCatAvg['total'] || 0;
+        const totBg    = u.total > 0 && totAvg > 0
+          ? (u.total/totAvg < 0.8 ? 'background:#c8e6c9;' : u.total/totAvg < 1.25 ? 'background:#fff9c4;' : 'background:#ffcdd2;')
+          : '';
         const totCell = u.total > 0
-          ? '<td id="vdcell_' + drillId + '_all" data-drill="' + drillId + '" data-cat="all" onclick="toggleVdetDrill(this.dataset.drill,this.dataset.cat)" style="text-align:right;font-weight:700;color:#1565c0;cursor:pointer;text-decoration:underline dotted">' + fmtCost(u.total) + '</td>'
+          ? '<td id="vdcell_' + drillId + '_all" data-drill="' + drillId + '" data-cat="all" onclick="toggleVdetDrill(this.dataset.drill,this.dataset.cat)" style="text-align:right;font-weight:700;color:#1565c0;cursor:pointer;text-decoration:underline dotted;' + totBg + '">' + fmtCost(u.total) + '</td>'
           : '<td style="text-align:right;color:#bbb">—</td>';
 
         return '<tr id="vrow_' + drillId + '" style="background:#fafbfc">' +
           '<td style="border-left:3px solid #c0cfe0"></td>' +
-          '<td style="font-size:12px;font-weight:600">' + u.unit + '</td>' +
-          '<td style="text-align:center">' + badge + '</td>' +
+          '<td style="font-size:12px;font-weight:600">' + u.unit + (isVacant ? ' <span style="font-size:8px;color:#c62828;font-weight:700">●</span>' : '') + '</td>' +
+          '<td style="text-align:center;font-size:11px;color:#555">' + moStr + '</td>' +
+          '<td style="text-align:center;font-weight:700;color:' + daysCol + ';font-size:12px">' + daysStr + '</td>' +
+          '<td style="text-align:center;font-size:11px;color:#2e7d32;font-weight:600">' + miStr + '</td>' +
           inspCell +
           totCell +
           mkCostCellCost(u.maint,     'maint') +
@@ -2987,6 +3034,9 @@ function renderVacDetail() {
 
     const grandTotal = propList.reduce((s,p)=>s+p.total, 0);
     const totalUnits = propList.reduce((s,p)=>s+p.units.length, 0);
+    // Inject Collapse All / Expand All into the panel header area
+    const ctrlBar = $('vac-cost-ctrl');
+    if (ctrlBar) { ctrlBar.style.display = ''; }
     const footer2 = $('vac-detail-footer');
     if (footer2) footer2.textContent = propList.length + ' properties · ' + totalUnits + ' units · Total turn spend: ' + fmtA(grandTotal) + ' (180-day window)';
 
