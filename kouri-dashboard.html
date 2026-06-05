@@ -2637,6 +2637,8 @@ function renderVacDetail() {
     lfSMIRows.filter(r => r.property && r.unit && r.move_in).forEach(r => {
       const key = `${r.property}|${normUnit(r.unit)}`;
       const mi = parseDate(r.move_in);
+      const mo = r.move_out ? parseDate(r.move_out) : null;
+      if (mi && mo && mi <= mo) return;  // same-day = cancelled transfer
       if (mi && (!vacMiLookup[key] || mi > vacMiLookup[key].date))
         vacMiLookup[key] = { date: mi, str: r.move_in };
     });
@@ -2857,6 +2859,9 @@ function renderVacDetail() {
     lfSMIRows.filter(r => r.property && r.unit && r.move_in).forEach(r => {
       const key = r.property + '|' + normUnit(r.unit);
       const mi = parseDate(r.move_in);
+      // Skip same-day or past move-in relative to move-out
+      const mo = r.move_out ? parseDate(r.move_out) : null;
+      if (mi && mo && mi <= mo) return;  // same-day or earlier = cancelled transfer
       if (mi && (!costMiLookup[key] || mi > costMiLookup[key])) costMiLookup[key] = mi;
     });
     // Also build move-out lookup from tickler for completed turns
@@ -3783,7 +3788,11 @@ async function loadLFSMI() {
     move_in   : r['Move In Date']  || '',
     move_out  : r['Move Out Date'] || '',
     status    : r['Status']        || '',
-  }));
+  })).filter(r => {
+    // Same-day move-in/move-out = cancelled transfer; treat unit as vacant, ignore the move-in
+    if (r.move_in && r.move_out && r.move_in.slice(0,10) === r.move_out.slice(0,10)) return false;
+    return true;
+  });
   if (ACCESS_PODS) lfSMIRows = accessFilter(lfSMIRows);
   console.log('[LF SMI] Rows loaded:', lfSMIRows.length);
   if (lfSMIRows.length > 0) {
@@ -3885,15 +3894,21 @@ async function loadLFTurnCosts() {
 async function loadLFMoveEvents() {
   if (GIDS.lfMoveEvents === '000000000') return;
   const raw = await fetchGViz(GIDS.lfMoveEvents);
-  lfMoveEventRows = raw.map(r => ({
-    property   : r['Property']      || '',
-    pod        : r['POD']           || '',
-    unit       : r['Unit']          || '',
-    tenant     : r['Tenant']        || '',
-    move_in    : r['Move In Date']  || '',
-    move_out   : r['Move Out Date'] || '',
-    status     : r['Status']        || '',
-  })).filter(r => r.property && r.unit);
+  lfMoveEventRows = raw.map(r => {
+    const mi = r['Move In Date']  || '';
+    const mo = r['Move Out Date'] || '';
+    // Same-day move-in/move-out = cancelled transfer; clear the move-in
+    const effectiveMi = (mi && mo && mi.slice(0,10) === mo.slice(0,10)) ? '' : mi;
+    return {
+      property   : r['Property'] || '',
+      pod        : r['POD']      || '',
+      unit       : r['Unit']     || '',
+      tenant     : r['Tenant']   || '',
+      move_in    : effectiveMi,
+      move_out   : mo,
+      status     : r['Status']   || '',
+    };
+  }).filter(r => r.property && r.unit);
   if (ACCESS_PODS) lfMoveEventRows = accessFilter(lfMoveEventRows);
   console.log('[LF MOVE EVENTS] Rows loaded:', lfMoveEventRows.length);
 }
