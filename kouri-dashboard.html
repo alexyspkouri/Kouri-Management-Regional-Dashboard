@@ -2629,11 +2629,15 @@ function renderVacDetail() {
     });
 
     // WO type classifiers — check job_description, service_request_desc, category, AND vendor
-    const wHay    = wo => (wo.job_description||'') + ' ' + (wo.instructions||'') + ' ' + (wo.unit_turn_category||'') + ' ' + (wo.service_request_desc||'') + ' ' + (wo.category||'') + ' ' + (wo.vendor||'');
+    const wHay    = wo => (wo.job_description||'') + ' ' + (wo.instructions||'') + ' ' + (wo.service_request_desc||'') + ' ' + (wo.category||'') + ' ' + (wo.vendor||'');
+    // unit_turn_category used as direct lookup only (not keyword match — prevents false positives)
+    const UTC_MAP = { 'Paint':'paint', 'Floors / Carpets':'floor', 'Housekeeping':'clean',
+                      'Appliances':'appliance', 'Final Inspection':'inspect', 'Initial Inspection':'inspect',
+                      'Maintenance / Repair':'maint', 'Keys / Locks':'maint', 'Other':'maint' };
     const wIsPaint = wo => /paint|repaint|touch.?up|primer|drywall|patch|texture/i.test(wHay(wo));
     const wIsFloor = wo => /floor|carpet|tile|vinyl|hardwood|laminate|lvp|lvt|subfloor/i.test(wHay(wo)) &&
                            !/paint/i.test(wHay(wo));  // carpet painting shouldn't be floor
-    const wIsClean = wo => /clean|housekeep|janitorial|deep clean|move.?out clean/i.test(wHay(wo));
+    const wIsClean = wo => /clean|housekeep|janitorial|deep clean|move.?out clean|ozone|deodor|saniti/i.test(wHay(wo));
     const wIsAppliance = wo => /appliance|stove|oven|fridge|refrigerator|dishwasher|washer|dryer|hvac|furnace|water heat/i.test(wHay(wo));
 
     // Bill categorizer + lookup for vdet (same rules as cost view)
@@ -2812,11 +2816,21 @@ function renderVacDetail() {
         if (miDate && cd > miDate) return false;           // after scheduled move-in
         return true;
       });
-      const paintWOs     = unitWOs.filter(wIsPaint);
-      const floorWOs     = unitWOs.filter(wo => !wIsPaint(wo) && wIsFloor(wo));
-      const cleanWOs     = unitWOs.filter(wo => !wIsPaint(wo) && !wIsFloor(wo) && wIsClean(wo));
-      const applianceWOs = unitWOs.filter(wo => !wIsPaint(wo) && !wIsFloor(wo) && !wIsClean(wo) && wIsAppliance(wo));
-      const maintWOs     = unitWOs.filter(wo => !wIsPaint(wo) && !wIsFloor(wo) && !wIsClean(wo) && !wIsAppliance(wo));
+      const woCat = wo => {
+        if (wIsPaint(wo))    return 'paint';
+        if (wIsFloor(wo))    return 'floor';
+        if (wIsClean(wo))    return 'clean';
+        if (wIsAppliance(wo)) return 'appliance';
+        // Fall back to AppFolio's unit turn category as structured lookup
+        const utc = UTC_MAP[wo.unit_turn_category || ''];
+        if (utc) return utc;
+        return 'maint';
+      };
+      const paintWOs     = unitWOs.filter(wo => woCat(wo) === 'paint');
+      const floorWOs     = unitWOs.filter(wo => woCat(wo) === 'floor');
+      const cleanWOs     = unitWOs.filter(wo => woCat(wo) === 'clean');
+      const applianceWOs = unitWOs.filter(wo => woCat(wo) === 'appliance');
+      const maintWOs     = unitWOs.filter(wo => woCat(wo) === 'maint');
       const allBills     = ['maint','paint','floor','clean','remodel','appliance','inspect'].flatMap(c => getUnitBills(unitKey, c, moDate, miDate));
       const maintBills   = getUnitBills(unitKey, 'maint',   moDate, miDate);
       const paintBills   = getUnitBills(unitKey, 'paint',   moDate, miDate);
