@@ -2831,7 +2831,7 @@ function renderVacDetail() {
       return 'maint';
     };
 
-    if (vacView === 'cost') {
+    if (vacView === 'cost') { try {
     const fmtCost = v => v > 0 ? '$' + v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) : '—';
 
     // ── Build scheduled move-in lookup ────────────────────────────────
@@ -2973,7 +2973,7 @@ function renderVacDetail() {
         const rawWOs = unitId ? (woByUnitId[unitId]||[]) : (woByUnit[u.unitKey]||[]);
         const unitWOs = rawWOs.filter(wo => {
           const cd = parseDate(wo.created_date); if (!cd) return false;
-          if (moDate2 && cd < new Date(moDate2.getTime()-7*864e5)) return false;
+          if (u.moDate && cd < new Date(u.moDate.getTime()-7*864e5)) return false;
           if (miDate2 && cd > miDate2) return false;
           return true;
         });
@@ -3047,7 +3047,7 @@ function renderVacDetail() {
     $('vac-detail-head').innerHTML = head;
     $('vac-detail-body').innerHTML = body;
     return;
-  }
+    } catch(e) { console.error('COST VIEW ERROR:', e); $('vac-detail-body').innerHTML = '<tr><td style="padding:20px;color:#c62828">Error: ' + e.message + '</td></tr>'; return; } }
 
     body = vacOnly.map((r, ri) => {
       const unitKey  = `${r.property}|${normUnit(r.unit)}`;
