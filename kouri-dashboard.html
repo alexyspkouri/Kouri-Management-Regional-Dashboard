@@ -2353,6 +2353,12 @@ let lfPOD = null, lfDateRange = 'cw', lfView = 'gc';
 // Standalone vacancy tab state
 let vacPOD = null, vacView = 'prop';
 let vacSort = { col: null, dir: 1 };
+let _costExpandedProps = new Set();
+function toggleCostProp(pi) {
+  if (_costExpandedProps.has(pi)) _costExpandedProps.delete(pi);
+  else _costExpandedProps.add(pi);
+  renderVacDetail();
+}
 function setVacSort(col) {
   vacSort.dir = vacSort.col === col ? -vacSort.dir : 1;
   vacSort.col = col;
@@ -2892,193 +2898,171 @@ function renderVacDetail() {
   }
 
   if (vacView === 'cost') {
-    const fmtCost = v => v > 0 ? '$' + v.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0}) : '—';
-    const costCell = (v, warn) => {
-      if (!v) return `<td style="text-align:right;color:#bbb">—</td>`;
-      const col = warn && v > warn ? '#c62828' : '#333';
-      return `<td style="text-align:right;font-weight:700;color:${col}">${fmtCost(v)}</td>`;
-    };
+    const fmtCost = v => v > 0 ? '$' + v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) : '—';
 
-    // ── Category classifiers — check description + GL account name + vendor name ──
-    // Priority order: Paint → Flooring → Cleaning → Inspection → Appliances → Maintenance → Other
-    const haystack = b => `${b.description||''} ${b.gl_account||''} ${b.vendor||''}`.toLowerCase();
-    // GL account overrides — checked before any keyword rules
-    const cIsCleanGL  = b => /turnover clean|carpet clean|move.?out clean|unit clean|housekeep|janitorial/i.test((b.gl_account||'').toLowerCase());
-    const cIsMaintGL  = b => /management charge|labour|labor|drain/i.test((b.gl_account||'').toLowerCase());
-    const cIsOtherGL  = b => /utility|electric|gas unit/i.test((b.gl_account||'').toLowerCase());
-    const cIsJunkGL   = b => /junk removal|trash removal/i.test((b.gl_account||'').toLowerCase());
-    const cIsRemodel  = b => /remodel|general repairs/i.test((b.gl_account||'').toLowerCase());
-    const cIsKouriVen = b => /kouri/i.test((b.vendor||'').toLowerCase());
-    const cIsPaint    = b => /paint|repaint|touch.?up|primer|drywall|patch|texture/i.test(haystack(b));
-    const cIsFloor    = b => /floor|tile|vinyl|hardwood|laminate|lvp|lvt|subfloor|rug/i.test(haystack(b)) ||
-                             (/carpet/i.test(haystack(b)) && !/clean/i.test(haystack(b)));
-    const cIsClean    = b => /clean|housekeep|janitorial|deep clean|move.?out|turnover|saniti/i.test(haystack(b));
-    const cIsInspect  = b => /inspect|punch.?list|assessment|walk.?through|make.?ready check/i.test(haystack(b));
-    const cIsApplianc = b => /appliance|stove|oven|fridge|refrigerator|dishwasher|washer|dryer|hvac|furnace|water heat/i.test(haystack(b));
-    const categorize  = b => {
-      if (cIsCleanGL(b))  return 'clean';    // GL overrides — always win
-      if (cIsMaintGL(b))  return 'maint';    // Kouri labor/mgmt charges
-      if (cIsOtherGL(b))  return 'appliance';
-      if (cIsJunkGL(b))   return 'clean';    // junk/trash → cleaning
-      if (cIsRemodel(b))  return 'remodel';  // explicit remodel GL accounts
-      if (cIsPaint(b))    return 'paint';
-      if (cIsFloor(b))    return 'floor';
-      if (cIsClean(b))    return 'clean';
-      if (cIsInspect(b))  return 'inspect';
-      if (cIsApplianc(b)) return 'appliance';
-      if (!cIsKouriVen(b)) return 'remodel'; // external vendor = remodel
-      return 'maint';
-    };
-
-    // ── Build bill lookup — exact property name + normalized unit only ──
-    // No fuzzy fallback: a unit number like "1" appears at many properties,
-    // so falling back to unit-only matching causes false assignments.
-    const billsByKey = {};   // property|normUnit → [bill, ...]
-    lfTurnCostRows.forEach(b => {
-      if (!b.unit) return;
-      const bd = parseDate(b.bill_date);
-      if (!bd) return;
-      const key = `${b.property}|${normUnit(b.unit)}`;
-      if (!billsByKey[key]) billsByKey[key] = [];
-      billsByKey[key].push({ ...b, _date: bd, _cat: categorize(b) });
-    });
-
-    // For a given vacant unit row, find matching bills
-    const getBills = (r, moDate, miDate) => {
-      const key = `${r.property}|${normUnit(r.unit)}`;
-      const candidates = billsByKey[key] || [];
-      // Filter to vacancy window: bill date >= move-out (7-day grace for same-day bills)
-      const windowStart = moDate ? new Date(moDate.getTime() - 7*864e5) : null;
-      return candidates.filter(b => {
-        if (windowStart && b._date < windowStart) return false;
-        if (miDate && b._date > miDate) return false;
-        return true;
-      });
-    };
-
-    // Build scheduled move-in lookup for cost view
+    // ── Build scheduled move-in lookup ────────────────────────────────
     const costMiLookup = {};
     lfSMIRows.filter(r => r.property && r.unit && r.move_in).forEach(r => {
-      const key = `${r.property}|${normUnit(r.unit)}`;
+      const key = r.property + '|' + normUnit(r.unit);
       const mi = parseDate(r.move_in);
       if (mi && (!costMiLookup[key] || mi > costMiLookup[key])) costMiLookup[key] = mi;
     });
 
-    // ── Step 1: compute totals for every vacant unit first, THEN sort ──
-    const vacOnly2 = src.filter(r => /vacant/i.test(r.unit_status)).map(r => {
-      const moDate = parseDate(r.last_move_out);
-      const miDate = costMiLookup[`${r.property}|${normUnit(r.unit)}`] || null;
-      const bills  = getBills(r, moDate, miDate);
-      const sum    = cat => bills.filter(b => b._cat === cat).reduce((s, b) => s + b.amount, 0);
-      return {
-        r, bills,
-        total:   bills.reduce((s, b) => s + b.amount, 0),
-        maint:     sum('maint'), paint: sum('paint'), floor: sum('floor'),
-        clean:     sum('clean'), remodel: sum('remodel'),
-        appliance: sum('appliance'), other: sum('inspect'),
+    // ── Build unit activity map: all bills + currently vacant units ────
+    // Uses vBillCat (sharedBillCat) which is already in scope
+    const unitActivityMap = {};
+    lfTurnCostRows.forEach(b => {
+      if (!b.unit || !b.property) return;
+      const bd = parseDate(b.bill_date); if (!bd) return;
+      const key = b.property + '|' + normUnit(b.unit);
+      if (!unitActivityMap[key]) unitActivityMap[key] = { property: b.property, unit: b.unit, bills: [], vacRow: null };
+      unitActivityMap[key].bills.push({ ...b, _date: bd, _cat: vBillCat(b) });
+    });
+    // Add currently vacant units even if no bills
+    lfVacRows.filter(r => /vacant/i.test(r.unit_status)).forEach(r => {
+      const key = r.property + '|' + normUnit(r.unit);
+      if (!unitActivityMap[key]) unitActivityMap[key] = { property: r.property, unit: r.unit, bills: [], vacRow: r };
+      else unitActivityMap[key].vacRow = r;
+    });
+
+    // ── Compute per-unit cost breakdown ───────────────────────────────
+    const computeUnit = u => {
+      const moDate = u.vacRow ? parseDate(u.vacRow.last_move_out) : null;
+      const unitKey = u.property + '|' + normUnit(u.unit);
+      const miDate  = costMiLookup[unitKey] || null;
+      const windowStart = moDate ? new Date(moDate.getTime() - 7*864e5) : null;
+      const bills = u.bills.filter(b => {
+        if (windowStart && b._date < windowStart) return false;
+        if (miDate && b._date > miDate) return false;
+        return true;
+      });
+      const sum = cat => bills.filter(b => b._cat === cat).reduce((s,b) => s+b.amount, 0);
+      return { ...u, bills, moDate, miDate, unitKey,
+        total: bills.reduce((s,b)=>s+b.amount,0),
+        maint: sum('maint'), paint: sum('paint'), floor: sum('floor'),
+        clean: sum('clean'), remodel: sum('remodel'), appliance: sum('appliance'),
       };
-    });
-
-    // ── Step 2: sort by whichever column was clicked ──
-    const costSortMap = {
-      property:   x => (x.r.property||'').toLowerCase(),
-      unit:       x => (x.r.unit||'').toLowerCase(),
-      days_vacant:x => parseInt(x.r.days_vacant)||0,
-      cost_total: x => x.total,
-      cost_maint: x => x.maint,
-      cost_paint: x => x.paint,
-      cost_floor: x => x.floor,
-      cost_clean:   x => x.clean,
-      cost_remodel:   x => x.remodel,
-      cost_appliance: x => x.appliance,
-      cost_other:     x => x.other,
     };
-    const cSortFn = costSortMap[vacSort.col] || (x => parseInt(x.r.days_vacant)||0);
-    const cSortDir = (vacSort.col && costSortMap[vacSort.col]) ? vacSort.dir : -1;
-    vacOnly2.sort((a, b) => {
-      const av = cSortFn(a), bv = cSortFn(b);
-      return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * cSortDir;
-    });
 
-    colspan = 12;
+    // ── Group by property, sort by total spend ────────────────────────
+    const propGroupMap = {};
+    Object.values(unitActivityMap).forEach(u => {
+      const cu = computeUnit(u);
+      if (!propGroupMap[cu.property]) propGroupMap[cu.property] = [];
+      propGroupMap[cu.property].push(cu);
+    });
+    const propList = Object.entries(propGroupMap).map(([prop, units], pi) => {
+      units.sort((a,b) => b.total - a.total);
+      const total = units.reduce((s,u) => s+u.total, 0);
+      return { prop, units, total, avg: units.length ? total/units.length : 0 };
+    }).sort((a,b) => b.total - a.total);
+
+    const fmtA = v => v > 0 ? '$' + v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) : '—';
+    const NCols = 11;
+    colspan = NCols;
+
     head = '<tr>' +
-      vacTh('Property','property',null) +
-      '<th style="text-align:center;font-size:10px;color:#888;font-weight:700;text-transform:uppercase;padding:6px 4px;width:44px">Unit</th>' +
-      vacTh('Days Vacant','days_vacant','center') +
-      '<th style="text-align:center;font-size:10px;color:#888;font-weight:700;text-transform:uppercase;padding:6px 8px;white-space:nowrap" title="Days from move-out to inspection">Inspection</th>' +
+      '<th style="width:16px"></th>' +
+      '<th>Unit</th>' +
+      '<th style="text-align:center">Status</th>' +
+      vacTh('Inspection','insp_date','center') +
       vacTh('Total','cost_total','right') +
       vacTh('Maint','cost_maint','right') +
       vacTh('Paint','cost_paint','right') +
       vacTh('Floor','cost_floor','right') +
-      vacTh('Clean','cost_clean','right') +
       vacTh('Remodel','cost_remodel','right') +
-      vacTh('Appliances','cost_appliance','right') +
-      vacTh('Other','cost_other','right') +
+      vacTh('Appl','cost_appliance','right') +
+      vacTh('Clean','cost_clean','right') +
       '</tr>';
 
-    const noData = lfTurnCostRows.length === 0
-      ? 'No turn cost data yet — run a sync'
-      : 'No vacant units';
+    window._costDrillData  = {};
+    window._vdetDrillData  = window._vdetDrillData || {};
 
-    // ── Step 3: store drill data and render ──
-    window._costDrillData = {};
+    body = propList.map((pg, pi) => {
+      const expanded = _costExpandedProps.has(pi);
+      const propRow = '<tr style="background:#e8ecf0;cursor:pointer" onclick="toggleCostProp(' + pi + ')">' +
+        '<td style="font-size:13px;text-align:center;color:#555">' + (expanded ? '▼' : '▶') + '</td>' +
+        '<td colspan="3" style="font-weight:700;font-size:13px">' + pg.prop +
+          '<span style="font-size:11px;color:#888;font-weight:400;margin-left:8px">' + pg.units.length + ' unit' + (pg.units.length!==1?'s':'') + '</span></td>' +
+        '<td style="text-align:right;font-weight:700;color:#1565c0;font-size:13px">' + fmtA(pg.total) + '</td>' +
+        '<td colspan="5" style="text-align:center;font-size:11px;color:#888">avg/unit: ' + fmtA(pg.avg) + '</td>' +
+        '<td></td></tr>';
 
-    const drillCell = (v, drillId, cat) => {
-      if (!v) return '<td style="text-align:right;color:#bbb">—</td>';
-      return '<td id="cell_' + drillId + '_' + cat + '"' +
-        ' style="text-align:right;font-weight:700;color:#222;cursor:pointer;text-decoration:underline dotted;border-radius:4px;transition:background 0.15s"' +
-        ' onclick="toggleCostDrill(\'' + drillId + '\',\'' + cat + '\')">' + fmtCost(v) + '</td>';
-    };
+      if (!expanded) return propRow;
 
-    body = vacOnly2.map(({ r, bills, total, maint, paint, floor, clean, remodel, appliance, other }, ri) => {
-      const drillId = 'cd_' + ri;
-      window._costDrillData[drillId] = bills;
-      const noBills = bills.length === 0;
-      const moDate2   = parseDate(r.last_move_out);
-      const unitKey2  = r.property + '|' + normUnit(r.unit);
-      // Inline inspection lookup for cost view
-      const inspCandidates = (lfInspRows || []).filter(ir =>
-        ir.property === r.property && normUnit(ir.unit) === normUnit(r.unit)
-      );
-      const inspMatch = inspCandidates.find(ir => {
-        const id = parseDate(ir.insp_date);
-        if (!id || !moDate2) return false;
-        return Math.abs((id.getTime() - moDate2.getTime()) / 864e5) <= 30;
-      });
-      let inspCell = '<td style="text-align:center;color:#bbb;font-size:11px">—</td>';
-      if (inspMatch) {
-        const iDate = parseDate(inspMatch.insp_date);
-        const days  = moDate2 && iDate ? Math.round((iDate - moDate2) / 864e5) : null;
-        const iCol  = days === null ? '#888' : days <= 3 ? '#2e7d32' : days <= 7 ? '#558b2f' : days <= 14 ? '#e65100' : '#c62828';
-        const iStr  = iDate ? iDate.toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
-        const iTip  = (days !== null ? days + ' days after move-out' : '') + (inspMatch.inspector ? ' · ' + inspMatch.inspector : '');
-        const iInner = '<span style="font-size:13px;font-weight:700;color:' + iCol + '">' + iStr + '</span>' +
-          (inspMatch.status ? '<br><span style="font-size:10px;color:#999">' + inspMatch.status + '</span>' : '');
-        inspCell = inspMatch.insp_id
-          ? '<td style="text-align:center;line-height:1.4"><a href="https://kmcprops.appfolio.com/inspections/' + inspMatch.insp_id + '" target="_blank" style="text-decoration:none" title="' + iTip + '">' + iInner + '</a></td>'
-          : '<td style="text-align:center;line-height:1.4" title="' + iTip + '">' + iInner + '</td>';
-      }
-      return '<tr id="crow_' + drillId + '">' +
-        '<td style="font-size:11px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (r.property||'') + '">' + (r.property ? (r.property.length > 22 ? r.property.slice(0,22) + '…' : r.property) : '—') + '</td>' +
-        '<td style="font-size:11px;color:#888;text-align:center;white-space:nowrap;padding:6px 3px;width:44px">' + (r.unit||'—') + '</td>' +
-        '<td style="text-align:center;font-weight:700;color:' + dvColor(r.days_vacant) + '">' + (r.days_vacant||'—') + '</td>' +
-        inspCell +
-        (noBills
-          ? '<td style="text-align:right;color:#bbb;font-size:11px" colspan="6">no bills found</td>'
-          : drillCell(total,'cd_'+ri,'all') + drillCell(maint,'cd_'+ri,'maint') + drillCell(paint,'cd_'+ri,'paint') +
-            drillCell(floor,'cd_'+ri,'floor') + drillCell(clean,'cd_'+ri,'clean') + drillCell(remodel,'cd_'+ri,'remodel') + drillCell(appliance,'cd_'+ri,'appliance') + drillCell(other,'cd_'+ri,'other')) +
-        '</tr>' +
-        '<tr id="drill_' + drillId + '" style="display:none;background:#f8fbff">' +
-          '<td colspan="12" style="padding:0;border-bottom:2px solid #1565c0">' +
-            '<div id="drillcontent_' + drillId + '" style="padding:10px 18px 14px"></div>' +
-          '</td>' +
-        '</tr>';
-    }).join('') || '<tr><td colspan="' + colspan + '" style="text-align:center;color:#aaa;padding:24px">' + noData + '</td></tr>';
+      const unitRows = pg.units.map((u, ui) => {
+        const drillId = 'cd_' + pi + '_' + ui;
+        window._costDrillData[drillId] = u.bills;
 
-    // Footer: total spend across all visible vacant units
-    const totalSpend = vacOnly2.reduce((s, x) => s + x.total, 0);
-    const footer = $('vac-detail-footer');
-    if (footer) footer.textContent = `${vacOnly2.length} vacant units · Total turn spend: $${totalSpend.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0})}${vacPOD ? ' · ' + vacPOD : ''}`;
+        const isVacant = u.vacRow && /vacant/i.test(u.vacRow.unit_status);
+        const badge = isVacant
+          ? '<span style="background:#ffebee;color:#c62828;font-size:9px;font-weight:700;border-radius:3px;padding:1px 5px">VACANT</span>'
+          : '<span style="background:#e8f5e9;color:#2e7d32;font-size:9px;font-weight:700;border-radius:3px;padding:1px 5px">TURNED</span>';
+
+        const moDate2 = u.moDate, miDate2 = u.miDate;
+        const inspCell = mkInspCell(u.unitKey, moDate2, miDate2, u.vacRow ? u.vacRow.inspection : '');
+
+        // Get WOs for this unit
+        const unitId = u.vacRow ? (u.vacRow.unit_id||'') : '';
+        const rawWOs = unitId ? (woByUnitId[unitId]||[]) : (woByUnit[u.unitKey]||[]);
+        const unitWOs = rawWOs.filter(wo => {
+          const cd = parseDate(wo.created_date); if (!cd) return false;
+          if (moDate2 && cd < new Date(moDate2.getTime()-7*864e5)) return false;
+          if (miDate2 && cd > miDate2) return false;
+          return true;
+        });
+
+        // Store drill data for toggleVdetDrill
+        const cats = ['maint','paint','floor','clean','remodel','appliance'];
+        window._vdetDrillData[drillId] = { all: { wos: unitWOs, bills: u.bills } };
+        cats.forEach(c => {
+          window._vdetDrillData[drillId][c] = {
+            wos: unitWOs.filter(wo => woCat(wo)===c),
+            bills: u.bills.filter(b => b._cat===c),
+          };
+        });
+
+        const mkCostCellCost = (val, cat) => {
+          if (!val) return '<td style="text-align:right;color:#bbb">—</td>';
+          const catBills = u.bills.filter(b=>b._cat===cat);
+          const catWOs   = unitWOs.filter(wo=>woCat(wo)===cat);
+          const sk = getCellStatus(catWOs, catBills);
+          const bgStyle = CELL_BG[sk] || '';
+          const oid = 'vdcell_' + drillId + '_' + cat;
+          return '<td id="' + oid + '" data-drill="' + drillId + '" data-cat="' + cat + '" onclick="toggleVdetDrill(this.dataset.drill,this.dataset.cat)" style="text-align:right;font-weight:700;color:#222;cursor:pointer;text-decoration:underline dotted;' + bgStyle + '">' + fmtCost(val) + '</td>';
+        };
+
+        const totCell = u.total > 0
+          ? '<td id="vdcell_' + drillId + '_all" data-drill="' + drillId + '" data-cat="all" onclick="toggleVdetDrill(this.dataset.drill,this.dataset.cat)" style="text-align:right;font-weight:700;color:#1565c0;cursor:pointer;text-decoration:underline dotted">' + fmtCost(u.total) + '</td>'
+          : '<td style="text-align:right;color:#bbb">—</td>';
+
+        return '<tr id="vrow_' + drillId + '" style="background:#fafbfc">' +
+          '<td style="border-left:3px solid #c0cfe0"></td>' +
+          '<td style="font-size:12px;font-weight:600">' + u.unit + '</td>' +
+          '<td style="text-align:center">' + badge + '</td>' +
+          inspCell +
+          totCell +
+          mkCostCellCost(u.maint,     'maint') +
+          mkCostCellCost(u.paint,     'paint') +
+          mkCostCellCost(u.floor,     'floor') +
+          mkCostCellCost(u.remodel,   'remodel') +
+          mkCostCellCost(u.appliance, 'appliance') +
+          mkCostCellCost(u.clean,     'clean') +
+          '</tr>' +
+          '<tr id="vdrill_' + drillId + '" style="display:none;background:#f8fbff">' +
+            '<td colspan="' + NCols + '" style="padding:0;border-bottom:2px solid #1565c0">' +
+              '<div id="vdrillcontent_' + drillId + '"></div>' +
+            '</td>' +
+          '</tr>';
+      }).join('');
+
+      return propRow + unitRows;
+    }).join('') || '<tr><td colspan="' + NCols + '" style="text-align:center;color:#aaa;padding:24px">No turn activity in the last 180 days</td></tr>';
+
+    const grandTotal = propList.reduce((s,p)=>s+p.total, 0);
+    const totalUnits = propList.reduce((s,p)=>s+p.units.length, 0);
+    const footer2 = $('vac-detail-footer');
+    if (footer2) footer2.textContent = propList.length + ' properties · ' + totalUnits + ' units · Total turn spend: ' + fmtA(grandTotal) + ' (180-day window)';
 
     $('vac-detail-head').innerHTML = head;
     $('vac-detail-body').innerHTML = body;
