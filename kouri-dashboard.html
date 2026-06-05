@@ -4441,10 +4441,11 @@ async function loadLastSync() {
       document.head.appendChild(s);
     });
     if (result) {
-      const d = new Date(result);
+      // Timestamp from Cloud Run is UTC — add 'Z' so JS parses it correctly
+      const d = new Date(result.replace(' ', 'T') + 'Z');
       if (!isNaN(d)) {
         $('lastUpdated').textContent = 'Data as of ' + d.toLocaleString('en-US',
-          { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
+          { month:'short', day:'numeric', hour:'numeric', minute:'2-digit', timeZoneName:'short' });
         return;
       }
     }
