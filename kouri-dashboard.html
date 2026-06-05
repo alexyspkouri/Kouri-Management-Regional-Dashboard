@@ -3056,7 +3056,7 @@ function renderVacDetail() {
           mkCostCellCost(u.remodel,   'remodel') +
           mkCostCellCost(u.appliance, 'appliance') +
           mkCostCellCost(u.clean,     'clean') +
-          ((() => { const lr=parseFloat(u.vacRow&&u.vacRow.last_rent||0),mr=parseFloat(u.vacRow&&u.vacRow.market_rent||0),tc=u.total; if(lr&&mr&&mr>lr&&tc>0){const roi=Math.round((mr-lr)*12/tc*100);return '<td style="text-align:right;font-weight:700;color:#6a1b9a;font-size:12px">'+roi+'%</td>';} return '<td style="text-align:right;color:#bbb">—</td>'; })()) +
+          ((() => { const lr=parseFloat(u.vacRow&&u.vacRow.last_rent||0),nr=parseFloat(u.vacRow&&u.vacRow.schd_rent||u.vacRow&&u.vacRow.market_rent||0),tc=u.total; if(lr&&nr&&nr>lr&&tc>0){const roi=Math.round((nr-lr)*12/tc*100);return '<td style="text-align:right;font-weight:700;color:#6a1b9a;font-size:12px">'+roi+'%</td>';} return '<td style="text-align:right;color:#bbb">—</td>'; })()) +
           '</tr>' +
           '<tr id="vdrill_' + drillId + '" style="display:none;background:#f8fbff">' +
             '<td colspan="' + NCols + '" style="padding:0;border-bottom:2px solid #1565c0">' +
@@ -3084,10 +3084,12 @@ function renderVacDetail() {
     body = vacOnly.map((r, ri) => {
       const unitKey  = `${r.property}|${normUnit(r.unit)}`;
       const miEntry  = vacMiLookup[unitKey];
-      const miStr    = miEntry ? fmtDate(miEntry.str) : '—';
+      const nextMiDirect = r.next_move_in ? parseDate(r.next_move_in) : null;
+      const miStr    = miEntry ? fmtDate(miEntry.str) : (nextMiDirect ? nextMiDirect.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—');
+      const miDate   = miEntry ? miEntry.date : (nextMiDirect || null);
       const _ticklerEvt = lfMoveEventRows.find(e => e.property === r.property && normUnit(e.unit) === normUnit(r.unit) && e.move_out);
       const moDate   = parseDate(r.last_move_out) || (_ticklerEvt ? parseDate(_ticklerEvt.move_out) : null);
-      const miDate   = miEntry ? miEntry.date : (_ticklerEvt && _ticklerEvt.move_in ? parseDate(_ticklerEvt.move_in) : null);
+      // miDate now set above with next_move_in fallback
       const bedBath  = (r.beds || r.baths) ? `${r.beds||'?'}bd/${r.baths||'?'}ba` : '—';
 
       // Filter WOs: prefer unit_id match, fall back to property|unit name match
@@ -3775,7 +3777,12 @@ async function loadLFVacancy() {
     baths        : r['Baths']              || '',
     sqft         : r['Sqft']               || '',
     market_rent  : r['Market Rent']        || '',
-    last_rent    : r['Last Rent']          || '',
+    last_rent      : r['Last Rent']          || '',
+    schd_rent      : r['Scheduled Rent']    || '',
+    next_move_in   : r['Next Move In']      || '',
+    turn_target    : r['Turn Target Date']  || '',
+    last_move_in   : r['Last Move In']      || '',
+    rent_ready     : r['Rent Ready']        || '',
     available    : r['Available Date']     || '',
     days_vacant  : r['Days Vacant']        || '',
     last_move_out: r['Last Move Out']      || '',
