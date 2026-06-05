@@ -2854,19 +2854,32 @@ function renderVacDetail() {
       if (mi && (!costMoLookup[key].mi || mi > costMoLookup[key].mi)) costMoLookup[key].mi = mi;
     });
 
-    // ── Build unit activity map: all bills + currently vacant units ────
-    // Uses vBillCat (sharedBillCat) which is already in scope
+    // ── Build sets of "turn units" — only units in an active or recent turn ──
+    // Currently vacant OR has a scheduled/recent move-in OR had a move-out in 180d
     const costPodFilter = b => !vacPOD || (b.pod === vacPOD);
+    const vacSrcCost = vacPOD ? lfVacRows.filter(r => r.pod === vacPOD) : lfVacRows;
+    const turnUnitKeys = new Set();
+    vacSrcCost.filter(r => /vacant/i.test(r.unit_status)).forEach(r =>
+      turnUnitKeys.add(r.property + '|' + normUnit(r.unit)));
+    lfSMIRows.forEach(r => {
+      if (r.property && r.unit) turnUnitKeys.add(r.property + '|' + normUnit(r.unit));
+    });
+    const cutoff180 = new Date(Date.now() - 180*864e5);
+    lfMoveEventRows.filter(r => r.move_out).forEach(r => {
+      const mo = parseDate(r.move_out);
+      if (mo && mo >= cutoff180) turnUnitKeys.add(r.property + '|' + normUnit(r.unit));
+    });
+
+    // Build unit activity map: bills for turn units only + currently vacant units
     const unitActivityMap = {};
     lfTurnCostRows.filter(costPodFilter).forEach(b => {
       if (!b.unit || !b.property) return;
-      const bd = parseDate(b.bill_date); if (!bd) return;
       const key = b.property + '|' + normUnit(b.unit);
+      if (!turnUnitKeys.has(key)) return;  // skip non-turn units
+      const bd = parseDate(b.bill_date); if (!bd) return;
       if (!unitActivityMap[key]) unitActivityMap[key] = { property: b.property, unit: b.unit, bills: [], vacRow: null };
       unitActivityMap[key].bills.push({ ...b, _date: bd, _cat: vBillCat(b) });
     });
-    // Add currently vacant units even if no bills (respect POD filter)
-    const vacSrcCost = vacPOD ? lfVacRows.filter(r => r.pod === vacPOD) : lfVacRows;
     vacSrcCost.filter(r => /vacant/i.test(r.unit_status)).forEach(r => {
       const key = r.property + '|' + normUnit(r.unit);
       if (!unitActivityMap[key]) unitActivityMap[key] = { property: r.property, unit: r.unit, bills: [], vacRow: r };
