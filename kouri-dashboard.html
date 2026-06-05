@@ -3363,6 +3363,20 @@ function toggleVdetDrill(vdrillId, cat) {
   if (unitRow) unitRow.style.background = '#dbeafe';
   const activeCell = $('vdcell_' + vdrillId + '_' + cat);
   if (activeCell) activeCell.style.outline = '2px solid #1565c0';
+
+  // Scroll the unit row to top of its table container so user sees row + drill-down
+  setTimeout(() => {
+    const wrap = unitRow ? unitRow.closest('.tbl-wrap') : null;
+    if (wrap && unitRow) {
+      const rowTop    = unitRow.offsetTop - wrap.offsetTop;
+      const wrapH     = wrap.clientHeight;
+      const drillH    = drillRow.offsetHeight;
+      // Only scroll if drill row isn't already visible
+      if (rowTop + unitRow.offsetHeight + drillH > wrap.scrollTop + wrapH) {
+        wrap.scrollTo({ top: Math.max(0, rowTop - 40), behavior: 'smooth' });
+      }
+    }
+  }, 50);
 }
 
 function renderVacTrend() {
