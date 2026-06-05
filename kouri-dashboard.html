@@ -3003,25 +3003,25 @@ function renderVacDetail() {
 
         const mkCostCellCost = (val, cat) => {
           if (!val) return '<td style="text-align:right;color:#bbb">—</td>';
-          // Comparative coloring: green=below avg, yellow=near avg, red=above avg
-          const avg   = propCatAvg[cat] || 0;
-          let bg = '';
+          // Comparative coloring on the number text
+          const avg  = propCatAvg[cat] || 0;
+          let col = '#222';
           if (val > 0 && avg > 0) {
             const ratio = val / avg;
-            bg = ratio < 0.8 ? 'background:#c8e6c9;'   // green — below avg
-               : ratio < 1.25 ? 'background:#fff9c4;'   // yellow — near avg
-               : 'background:#ffcdd2;';                  // red — above avg
+            col = ratio < 0.8  ? '#2e7d32'   // green — below avg
+                : ratio < 1.25 ? '#e65100'   // orange — near avg
+                : '#c62828';                  // red — above avg
           }
           const oid = 'vdcell_' + drillId + '_' + cat;
-          return '<td id="' + oid + '" data-drill="' + drillId + '" data-cat="' + cat + '" onclick="toggleVdetDrill(this.dataset.drill,this.dataset.cat)" style="text-align:right;font-weight:700;color:#222;cursor:pointer;text-decoration:underline dotted;' + bg + '">' + fmtCost(val) + '</td>';
+          return '<td id="' + oid + '" data-drill="' + drillId + '" data-cat="' + cat + '" onclick="toggleVdetDrill(this.dataset.drill,this.dataset.cat)" style="text-align:right;font-weight:700;color:' + col + ';cursor:pointer;text-decoration:underline dotted">' + fmtCost(val) + '</td>';
         };
 
         const totAvg   = propCatAvg['total'] || 0;
-        const totBg    = u.total > 0 && totAvg > 0
-          ? (u.total/totAvg < 0.8 ? 'background:#c8e6c9;' : u.total/totAvg < 1.25 ? 'background:#fff9c4;' : 'background:#ffcdd2;')
-          : '';
+        const totCol   = u.total > 0 && totAvg > 0
+          ? (u.total/totAvg < 0.8 ? '#2e7d32' : u.total/totAvg < 1.25 ? '#e65100' : '#c62828')
+          : '#1565c0';
         const totCell = u.total > 0
-          ? '<td id="vdcell_' + drillId + '_all" data-drill="' + drillId + '" data-cat="all" onclick="toggleVdetDrill(this.dataset.drill,this.dataset.cat)" style="text-align:right;font-weight:700;color:#1565c0;cursor:pointer;text-decoration:underline dotted;' + totBg + '">' + fmtCost(u.total) + '</td>'
+          ? '<td id="vdcell_' + drillId + '_all" data-drill="' + drillId + '" data-cat="all" onclick="toggleVdetDrill(this.dataset.drill,this.dataset.cat)" style="text-align:right;font-weight:700;color:' + totCol + ';cursor:pointer;text-decoration:underline dotted">' + fmtCost(u.total) + '</td>'
           : '<td style="text-align:right;color:#bbb">—</td>';
 
         return '<tr id="vrow_' + drillId + '" style="background:#fafbfc">' +
