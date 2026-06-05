@@ -2804,7 +2804,17 @@ function renderVacDetail() {
       return '<td style="' + base + '">' + inner + '</td>';
     }
     const empty = lfVacRows.length === 0 ? 'Loading…' : 'No vacant units';
-  if (vacView === 'cost') {
+    const woCat = wo => {
+      if (wIsPaint(wo))    return 'paint';
+      if (wIsFloor(wo))    return 'floor';
+      if (wIsClean(wo))    return 'clean';
+      if (wIsAppliance(wo)) return 'appliance';
+      const utc = UTC_MAP[wo.unit_turn_category || ''];
+      if (utc) return utc;
+      return 'maint';
+    };
+
+    if (vacView === 'cost') {
     const fmtCost = v => v > 0 ? '$' + v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) : '—';
 
     // ── Build scheduled move-in lookup ────────────────────────────────
@@ -2817,16 +2827,18 @@ function renderVacDetail() {
 
     // ── Build unit activity map: all bills + currently vacant units ────
     // Uses vBillCat (sharedBillCat) which is already in scope
+    const costPodFilter = b => !vacPOD || (b.pod === vacPOD);
     const unitActivityMap = {};
-    lfTurnCostRows.forEach(b => {
+    lfTurnCostRows.filter(costPodFilter).forEach(b => {
       if (!b.unit || !b.property) return;
       const bd = parseDate(b.bill_date); if (!bd) return;
       const key = b.property + '|' + normUnit(b.unit);
       if (!unitActivityMap[key]) unitActivityMap[key] = { property: b.property, unit: b.unit, bills: [], vacRow: null };
       unitActivityMap[key].bills.push({ ...b, _date: bd, _cat: vBillCat(b) });
     });
-    // Add currently vacant units even if no bills
-    lfVacRows.filter(r => /vacant/i.test(r.unit_status)).forEach(r => {
+    // Add currently vacant units even if no bills (respect POD filter)
+    const vacSrcCost = vacPOD ? lfVacRows.filter(r => r.pod === vacPOD) : lfVacRows;
+    vacSrcCost.filter(r => /vacant/i.test(r.unit_status)).forEach(r => {
       const key = r.property + '|' + normUnit(r.unit);
       if (!unitActivityMap[key]) unitActivityMap[key] = { property: r.property, unit: r.unit, bills: [], vacRow: r };
       else unitActivityMap[key].vacRow = r;
@@ -2887,13 +2899,20 @@ function renderVacDetail() {
 
     body = propList.map((pg, pi) => {
       const expanded = _costExpandedProps.has(pi);
+      const n = pg.units.length || 1;
+      const avgCat = cat => { const t = pg.units.reduce((s,u)=>s+(u[cat]||0),0); return t>0 ? fmtA(t/n) : '—'; };
       const propRow = '<tr style="background:#e8ecf0;cursor:pointer" onclick="toggleCostProp(' + pi + ')">' +
         '<td style="font-size:13px;text-align:center;color:#555">' + (expanded ? '▼' : '▶') + '</td>' +
         '<td colspan="3" style="font-weight:700;font-size:13px">' + pg.prop +
           '<span style="font-size:11px;color:#888;font-weight:400;margin-left:8px">' + pg.units.length + ' unit' + (pg.units.length!==1?'s':'') + '</span></td>' +
-        '<td style="text-align:right;font-weight:700;color:#1565c0;font-size:13px">' + fmtA(pg.total) + '</td>' +
-        '<td colspan="5" style="text-align:center;font-size:11px;color:#888">avg/unit: ' + fmtA(pg.avg) + '</td>' +
-        '<td></td></tr>';
+        '<td style="text-align:right;font-weight:700;color:#1565c0;font-size:12px">' + fmtA(pg.total) + '<br><span style="font-size:9px;color:#888;font-weight:400">avg: ' + fmtA(pg.avg) + '</span></td>' +
+        '<td style="text-align:right;font-size:10px;color:#666">' + avgCat('maint') + '</td>' +
+        '<td style="text-align:right;font-size:10px;color:#666">' + avgCat('paint') + '</td>' +
+        '<td style="text-align:right;font-size:10px;color:#666">' + avgCat('floor') + '</td>' +
+        '<td style="text-align:right;font-size:10px;color:#666">' + avgCat('remodel') + '</td>' +
+        '<td style="text-align:right;font-size:10px;color:#666">' + avgCat('appliance') + '</td>' +
+        '<td style="text-align:right;font-size:10px;color:#666">' + avgCat('clean') + '</td>' +
+        '</tr>';
 
       if (!expanded) return propRow;
 
@@ -2994,16 +3013,7 @@ function renderVacDetail() {
         if (miDate && cd > miDate) return false;           // after scheduled move-in
         return true;
       });
-      const woCat = wo => {
-        if (wIsPaint(wo))    return 'paint';
-        if (wIsFloor(wo))    return 'floor';
-        if (wIsClean(wo))    return 'clean';
-        if (wIsAppliance(wo)) return 'appliance';
-        // Fall back to AppFolio's unit turn category as structured lookup
-        const utc = UTC_MAP[wo.unit_turn_category || ''];
-        if (utc) return utc;
-        return 'maint';
-      };
+      // woCat hoisted to outer scope
       const paintWOs     = unitWOs.filter(wo => woCat(wo) === 'paint');
       const floorWOs     = unitWOs.filter(wo => woCat(wo) === 'floor');
       const cleanWOs     = unitWOs.filter(wo => woCat(wo) === 'clean');
