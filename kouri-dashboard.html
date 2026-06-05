@@ -2894,7 +2894,7 @@ function renderVacDetail() {
     colspan = NCols;
 
     head = '<tr>' +
-      '<th style="width:16px"></th>' +
+      '<th style="width:20px"></th>' +
       vacTh('Unit','unit',null) +
       vacTh('Move Out','move_out','center') +
       vacTh('Days','days_vacant','center') +
@@ -2923,7 +2923,7 @@ function renderVacDetail() {
         propCatAvg[cat] = vals.length ? vals.reduce((s,v)=>s+v,0)/vals.length : 0;
       });
       const propRow = '<tr style="background:#e8ecf0;cursor:pointer" onclick="toggleCostProp(' + pi + ')">' +
-        '<td style="font-size:13px;text-align:center;color:#555">' + (expanded ? '▼' : '▶') + '</td>' +
+        '<td style="width:20px;text-align:center;color:#555">' + (expanded ? '▼' : '▶') + '</td>' +
         '<td colspan="5" style="font-weight:700;font-size:13px">' + pg.prop +
           '<span style="font-size:11px;color:#888;font-weight:400;margin-left:8px">' + pg.units.length + ' unit' + (pg.units.length!==1?'s':'') + '</span></td>' +
         '<td style="text-align:right;font-weight:700;color:#1565c0;font-size:12px">' + fmtA(pg.total) + '<br><span style="font-size:9px;color:#888;font-weight:400">avg: ' + fmtA(pg.avg) + '</span></td>' +
@@ -3008,7 +3008,7 @@ function renderVacDetail() {
           : '<td style="text-align:right;color:#bbb">—</td>';
 
         return '<tr id="vrow_' + drillId + '" style="background:#fafbfc">' +
-          '<td style="border-left:3px solid #c0cfe0"></td>' +
+          '<td style="border-left:3px solid #c0cfe0;width:20px"></td>' +
           '<td style="font-size:12px;font-weight:600">' + u.unit + (isVacant ? ' <span style="font-size:8px;color:#c62828;font-weight:700">●</span>' : '') + '</td>' +
           '<td style="text-align:center;font-size:11px;color:#555">' + moStr + '</td>' +
           '<td style="text-align:center;font-weight:700;color:' + daysCol + ';font-size:12px">' + daysStr + '</td>' +
@@ -3364,19 +3364,10 @@ function toggleVdetDrill(vdrillId, cat) {
   const activeCell = $('vdcell_' + vdrillId + '_' + cat);
   if (activeCell) activeCell.style.outline = '2px solid #1565c0';
 
-  // Scroll the unit row to top of its table container so user sees row + drill-down
+  // Scroll so the unit row stays visible with drill-down below it
   setTimeout(() => {
-    const wrap = unitRow ? unitRow.closest('.tbl-wrap') : null;
-    if (wrap && unitRow) {
-      const rowTop    = unitRow.offsetTop - wrap.offsetTop;
-      const wrapH     = wrap.clientHeight;
-      const drillH    = drillRow.offsetHeight;
-      // Only scroll if drill row isn't already visible
-      if (rowTop + unitRow.offsetHeight + drillH > wrap.scrollTop + wrapH) {
-        wrap.scrollTo({ top: Math.max(0, rowTop - 40), behavior: 'smooth' });
-      }
-    }
-  }, 50);
+    if (unitRow) unitRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, 30);
 }
 
 function renderVacTrend() {
