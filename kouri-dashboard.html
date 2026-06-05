@@ -2582,6 +2582,7 @@ function renderVacDetail() {
       property:     r => (r.property || '').toLowerCase(),
       unit:         r => (r.unit || '').toLowerCase(),
       days_vacant:  r => parseInt(r.days_vacant) || 0,
+      vac_cost:     r => { const dv=parseInt(r.days_vacant)||0; const mr=parseFloat(r.market_rent)||0; return dv*(mr/30); },
       available:    r => r.available || '',
       move_out:     r => r.last_move_out || '',
       insp_date:    r => r.inspection || '',
@@ -2599,12 +2600,13 @@ function renderVacDetail() {
       const av = vSortFn(a), bv = vSortFn(b);
       return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * vSortDir;
     });
-    colspan = 14;
+    colspan = 15;
     head = `<tr>
       ${vacTh('Property','property',null)}
       ${vacTh('Unit','unit',null)}
       <th style="text-align:center">Bed/Bath</th>
       ${vacTh('Days Vacant','days_vacant','center')}
+      ${vacTh('Vac Cost','vac_cost','right')}
       ${vacTh('Move In','available',null)}
       ${vacTh('Move Out','move_out','center')}
       ${vacTh('Inspection','insp_date','center')}
@@ -2920,7 +2922,7 @@ function renderVacDetail() {
     }).sort((a,b) => b.total - a.total);
 
     const fmtA = v => v > 0 ? '$' + v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) : '—';
-    const NCols = 13;
+    const NCols = 15;
     colspan = NCols;
 
     head = '<tr>' +
@@ -2928,6 +2930,7 @@ function renderVacDetail() {
       vacTh('Unit','unit',null) +
       vacTh('Move Out','move_out','center') +
       vacTh('Days','days_vacant','center') +
+      '<th style="text-align:right;font-size:10px;color:#888;font-weight:700;text-transform:uppercase;padding:6px 8px;white-space:nowrap" title="Days Vacant × Market Rent/30">Vac Cost</th>' +
       vacTh('Move In','available','center') +
       vacTh('Inspection','insp_date','center') +
       vacTh('Total','cost_total','right') +
@@ -2937,6 +2940,7 @@ function renderVacDetail() {
       vacTh('Remodel','cost_remodel','right') +
       vacTh('Appl','cost_appliance','right') +
       vacTh('Clean','cost_clean','right') +
+      '<th style="text-align:right;font-size:10px;color:#888;font-weight:700;text-transform:uppercase;padding:6px 8px" title="Annualized rent increase / Turn cost">ROI</th>' +
       '</tr>';
 
     window._costDrillData  = {};
@@ -3042,6 +3046,7 @@ function renderVacDetail() {
           '<td style="font-size:12px;font-weight:600">' + u.unit + (isVacant ? ' <span style="font-size:8px;color:#c62828;font-weight:700">●</span>' : '') + '</td>' +
           '<td style="text-align:center;font-size:11px;color:#555">' + moStr + '</td>' +
           '<td style="text-align:center;font-weight:700;color:' + daysCol + ';font-size:12px">' + daysStr + '</td>' +
+          ((() => { const mr=parseFloat(u.vacRow&&u.vacRow.market_rent||0),dv=parseInt(u.vacRow&&u.vacRow.days_vacant||0); return mr&&dv?'<td style="text-align:right;font-weight:700;color:#8b4513;font-size:12px">$'+(dv*(mr/30)).toLocaleString('en-US',{maximumFractionDigits:0})+'</td>':'<td style="text-align:right;color:#bbb">—</td>'; })()) +
           '<td style="text-align:center;font-size:11px;color:#2e7d32;font-weight:600">' + miStr + '</td>' +
           inspCell +
           totCell +
@@ -3051,6 +3056,7 @@ function renderVacDetail() {
           mkCostCellCost(u.remodel,   'remodel') +
           mkCostCellCost(u.appliance, 'appliance') +
           mkCostCellCost(u.clean,     'clean') +
+          ((() => { const lr=parseFloat(u.vacRow&&u.vacRow.last_rent||0),mr=parseFloat(u.vacRow&&u.vacRow.market_rent||0),tc=u.total; if(lr&&mr&&mr>lr&&tc>0){const roi=Math.round((mr-lr)*12/tc*100);return '<td style="text-align:right;font-weight:700;color:#6a1b9a;font-size:12px">'+roi+'%</td>';} return '<td style="text-align:right;color:#bbb">—</td>'; })()) +
           '</tr>' +
           '<tr id="vdrill_' + drillId + '" style="display:none;background:#f8fbff">' +
             '<td colspan="' + NCols + '" style="padding:0;border-bottom:2px solid #1565c0">' +
@@ -3141,6 +3147,7 @@ function renderVacDetail() {
         <td style="font-size:12px;color:#555">${r.unit||'—'}</td>
         <td style="text-align:center;font-size:12px">${bedBath}</td>
         <td style="text-align:center;font-weight:700;color:${dvColor(r.days_vacant)}">${r.days_vacant||'—'}</td>
+        <td style="text-align:right;font-weight:700;color:#8b4513">${(()=>{ const dv=parseInt(r.days_vacant)||0,mr=parseFloat(r.market_rent)||0; return dv&&mr?'$'+(dv*(mr/30)).toLocaleString('en-US',{maximumFractionDigits:0}):'—'; })()}</td>
         <td style="font-size:12px;color:#2e7d32;font-weight:600">${miStr}</td>
         <td style="text-align:center;font-size:12px;color:#555">${moStr}</td>
         ${mkInspCell(unitKey, moDate, miDate, r.inspection)}` +
@@ -3768,6 +3775,7 @@ async function loadLFVacancy() {
     baths        : r['Baths']              || '',
     sqft         : r['Sqft']               || '',
     market_rent  : r['Market Rent']        || '',
+    last_rent    : r['Last Rent']          || '',
     available    : r['Available Date']     || '',
     days_vacant  : r['Days Vacant']        || '',
     last_move_out: r['Last Move Out']      || '',
