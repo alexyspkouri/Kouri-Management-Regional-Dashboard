@@ -1890,9 +1890,23 @@ async function loadRET() {
 }
 
 async function loadRetEvents() {
-  if (GIDS.retentionEvents === '000000000') return;
   try {
-    const raw = await fetchGViz(GIDS.retentionEvents);
+    // Use sheet name so no GID needed
+    const SHEET_ID2 = '1hrqBQNfYFurz9I9LEXegtgQxS4aWuMPKZsNsF5JEro8';
+    const raw = await new Promise((resolve, reject) => {
+      const cb = '_gvizRE' + Date.now();
+      const timer = setTimeout(() => { delete window[cb]; resolve([]); }, 15000);
+      window[cb] = resp => {
+        clearTimeout(timer); delete window[cb];
+        if (resp.status === 'error') { resolve([]); return; }
+        const cols = resp.table.cols.map(c => c.label || c.id);
+        resolve((resp.table.rows||[]).map(row => { const o={}; (row.c||[]).forEach((c,i)=>{ o[cols[i]]=c?c.v??'':''; }); return o; }));
+      };
+      const s = document.createElement('script');
+      s.onerror = () => { clearTimeout(timer); delete window[cb]; resolve([]); };
+      s.src = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID2 + '/gviz/tq?tqx=responseHandler:' + cb + '&sheet=Retention%20Events&headers=1';
+      document.head.appendChild(s);
+    });
     retEventRows = raw.map(r => ({
       ym:          r['Year-Month']  || '',
       event_type:  r['Event Type']  || '',
@@ -1915,6 +1929,10 @@ function toggleRetDrill(el, ym, eventType, podFilter) {
   const id = 'retdrill_' + ym + '_' + eventType;
   const existing = $(id);
   const existingRow = $(id + '-row');
+  // Clear any existing highlight
+  document.querySelectorAll('[data-ret-active="1"]').forEach(c => {
+    c.style.background=''; c.style.color=''; c.style.borderRadius=''; delete c.dataset.retActive;
+  });
   // Close if same drill open
   if (_openRetDrill === id) {
     if (existingRow) existingRow.remove();
@@ -1965,6 +1983,14 @@ function toggleRetDrill(el, ym, eventType, podFilter) {
   // Caller should pass the element via event, but we find it by data attribute
   const tr = el ? el.closest('tr') : null;
   if (tr) tr.insertAdjacentHTML('afterend', '<tr id="' + id + '-row"><td colspan="7" style="padding:0">' + html + '</td></tr>');
+
+  // Highlight the clicked cell
+  if (el) {
+    el.style.background = '#006140';
+    el.style.color = '#fff';
+    el.style.borderRadius = '4px';
+    el.dataset.retActive = '1';
+  }
 }
 
 async function loadRETMonthly() {
