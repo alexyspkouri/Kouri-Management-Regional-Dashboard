@@ -1039,7 +1039,7 @@ const GIDS = {
   retention:        '82038347',
   retentionMonthly: '5709581',
   retentionHistory: '306861938',
-  retentionEvents:  '000000000',  // set after first sync
+  retentionEvents:  '1448441157',
   leasingFunnel:    '47064229',
   lfGuestCards:     '740225880',
   lfShowings:       '413531120',
@@ -1891,22 +1891,7 @@ async function loadRET() {
 
 async function loadRetEvents() {
   try {
-    // Use sheet name so no GID needed
-    const SHEET_ID2 = '1hrqBQNfYFurz9I9LEXegtgQxS4aWuMPKZsNsF5JEro8';
-    const raw = await new Promise((resolve, reject) => {
-      const cb = '_gvizRE' + Date.now();
-      const timer = setTimeout(() => { delete window[cb]; resolve([]); }, 15000);
-      window[cb] = resp => {
-        clearTimeout(timer); delete window[cb];
-        if (resp.status === 'error') { resolve([]); return; }
-        const cols = resp.table.cols.map(c => c.label || c.id);
-        resolve((resp.table.rows||[]).map(row => { const o={}; (row.c||[]).forEach((c,i)=>{ o[cols[i]]=c?c.v??'':''; }); return o; }));
-      };
-      const s = document.createElement('script');
-      s.onerror = () => { clearTimeout(timer); delete window[cb]; resolve([]); };
-      s.src = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID2 + '/gviz/tq?tqx=responseHandler:' + cb + '&sheet=Retention%20Events&headers=1';
-      document.head.appendChild(s);
-    });
+    const raw = await fetchGViz(GIDS.retentionEvents);
     retEventRows = raw.map(r => ({
       ym:          r['Year-Month']  || '',
       event_type:  r['Event Type']  || '',
@@ -4833,6 +4818,7 @@ async function loadLastSync() {
   if (GIDS.lfGuestCards !== '000000000') loaders.push(loadLF());
   await Promise.all(loaders);
   if (GIDS.retentionMonthly !== '000000000') loadRETMonthly();
+  loadRetEvents();
   if (GIDS.retentionEvents !== '000000000') loadRetEvents();
   if (GIDS.retentionHistory !== '000000000') loadRETHistory();
   loadLastSync();  // update header timestamp to last sync time
