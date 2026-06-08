@@ -2626,12 +2626,7 @@ function renderVacDetail() {
       // so we return 0 here; bill sorts run a second pass after those are defined
       return 0;
     };
-    const vSortFn  = vSortKey[vacSort.col] || (r => parseInt(r.days_vacant) || 0);
-    const vSortDir = (vacSort.col && vSortKey[vacSort.col]) ? vacSort.dir : -1;
-    vacOnly.sort((a, b) => {
-      const av = vSortFn(a), bv = vSortFn(b);
-      return (typeof av === 'string' ? av.localeCompare(bv) : av - bv) * vSortDir;
-    });
+    // Sort deferred — runs after inspByUnit and getUnitBills are initialized (see below)
     colspan = 14;
     head = `<tr>
       ${vacTh('Property','property',null)}
@@ -2751,20 +2746,29 @@ function renderVacDetail() {
     // Bill-amount sort: re-sort vacOnly now that getUnitBills is available
     const BILL_SORT_COLS = { total_cost:'_all', maint_status:'maint', paint_status:'paint',
       floor_status:'floor', remodel_status:'remodel', appliance_status:'appliance', clean_status:'clean' };
+    const sortDir2 = vacSort.col ? vacSort.dir : -1;
     if (BILL_SORT_COLS[vacSort.col]) {
-      const billSortDir = vacSort.dir || -1;
       vacOnly.sort((a, b) => {
         const getTotal = r => {
-          const uk = r.property + '|' + normUnit(r.unit);
-          const mo = parseDate(r.last_move_out);
-          const mi = lfSMIRows.find(s=>s.property===r.property&&normUnit(s.unit)===normUnit(r.unit)&&s.move_in);
-          const miDate = mi ? parseDate(mi.move_in) : (r.next_move_in ? parseDate(r.next_move_in) : null);
-          const cat = BILL_SORT_COLS[vacSort.col];
-          if (cat === '_all') return ['maint','paint','floor','clean','remodel','appliance'].reduce((s,c)=>s+getUnitBills(uk,c,mo,miDate).reduce((ss,b)=>ss+b.amount,0),0);
-          return getUnitBills(uk, cat, mo, miDate).reduce((s,b)=>s+b.amount,0);
+          const uk=r.property+'|'+normUnit(r.unit), mo=parseDate(r.last_move_out);
+          const smi=lfSMIRows.find(s=>s.property===r.property&&normUnit(s.unit)===normUnit(r.unit)&&s.move_in);
+          const mi=smi?parseDate(smi.move_in):(r.next_move_in?parseDate(r.next_move_in):null);
+          const cat=BILL_SORT_COLS[vacSort.col];
+          const cats=cat==='_all'?['maint','paint','floor','clean','remodel','appliance']:[cat];
+          return cats.reduce((s,c)=>s+getUnitBills(uk,c,mo,mi).reduce((ss,b)=>ss+b.amount,0),0);
         };
-        return (getTotal(a) - getTotal(b)) * billSortDir;
+        return (getTotal(a)-getTotal(b))*sortDir2;
       });
+    } else if (vacSort.col === 'insp_date') {
+      vacOnly.sort((a, b) => {
+        const getD = r => { const uk=r.property+'|'+normUnit(r.unit),mo=parseDate(r.last_move_out); const match=(inspByUnit[uk]||[]).find(ir=>{const id=parseDate(ir.insp_date);return id&&mo&&Math.abs((id-mo)/864e5)<=30;}); return match?match.insp_date||'':''; };
+        return getD(a).localeCompare(getD(b))*sortDir2;
+      });
+    } else if (vacSort.col) {
+      const fn = vSortKey[vacSort.col] || (r => parseInt(r.days_vacant)||0);
+      vacOnly.sort((a,b) => { const av=fn(a),bv=fn(b); return (typeof av==='string'?av.localeCompare(bv):av-bv)*sortDir2; });
+    } else {
+      vacOnly.sort((a,b) => (parseInt(b.days_vacant)||0)-(parseInt(a.days_vacant)||0));
     }
 
     // Inspection cell: best match within ±30 days of move-out and before move-in.
