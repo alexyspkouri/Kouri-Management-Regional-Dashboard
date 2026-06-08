@@ -453,7 +453,7 @@ tbody td { padding: 6px 8px; color: #333; font-size: 12px; }
     <span class="tab-badge" id="lf-badge">—</span>
   </div>
   <div class="tab-btn" id="tb-vac" onclick="showTab('vac')">
-    🏠 Vacancy
+    📋 Unit Turns
     <span class="tab-badge" id="vac-badge">—</span>
   </div>
 </div>
@@ -2595,17 +2595,30 @@ function renderVacDetail() {
       unit:         r => (r.unit || '').toLowerCase(),
       days_vacant:  r => parseInt(r.days_vacant) || 0,
       vac_cost:     r => { const dv=parseInt(r.days_vacant)||0; const mr=parseFloat(r.market_rent)||0; return dv*(mr/30); },
-      available:    r => r.available || '',
+      available:    r => r.next_move_in || r.available || '',
       move_out:     r => r.last_move_out || '',
-      insp_date:    r => r.inspection || '',
-      total_cost:   r => 0,
-      maint_status: r => r.maintenance || '',
-      paint_status: r => r.paint || '',
-      floor_status: r => r.flooring || '',
-      clean_status:   r => r.cleaning || '',
-      remodel_status:   r => '',
-      appliance_status: r => '',
+      insp_date:    r => { const uk=r.property+'|'+normUnit(r.unit); const cands=inspByUnit[uk]||[]; const mo=parseDate(r.last_move_out); const match=cands.find(ir=>{const id=parseDate(ir.insp_date);return id&&mo&&Math.abs((id-mo)/864e5)<=30;}); return match?match.insp_date||'':''; },
+      total_cost:   r => _vdetTotal(r,'total'),
+      maint_status: r => _vdetTotal(r,'maint'),
+      paint_status: r => _vdetTotal(r,'paint'),
+      floor_status: r => _vdetTotal(r,'floor'),
+      clean_status: r => _vdetTotal(r,'clean'),
+      remodel_status:   r => _vdetTotal(r,'remodel'),
+      appliance_status: r => _vdetTotal(r,'appliance'),
     };
+    // Pre-compute bill totals per unit for sort keys that need them
+    const _vdetTotals = {};
+    if (['total_cost','maint_status','paint_status','floor_status','remodel_status','appliance_status','clean_status'].includes(vacSort.col)) {
+      vacOnly.forEach(r => {
+        const uk = r.property + '|' + normUnit(r.unit);
+        const mo = parseDate(r.last_move_out), mi = costMiLookup ? (costMiLookup[uk]||null) : null;
+        const sum = cat => getUnitBills(uk, cat, mo, mi).reduce((s,b)=>s+b.amount,0);
+        _vdetTotals[uk] = { total: ['maint','paint','floor','clean','remodel','appliance'].reduce((s,c)=>s+sum(c),0),
+          maint:sum('maint'), paint:sum('paint'), floor:sum('floor'),
+          clean:sum('clean'), remodel:sum('remodel'), appliance:sum('appliance') };
+      });
+    }
+    const _vdetTotal = (r, cat) => { const t=_vdetTotals[r.property+'|'+normUnit(r.unit)]; return t?(t[cat]||0):0; };
     const vSortFn  = vSortKey[vacSort.col] || (r => parseInt(r.days_vacant) || 0);
     const vSortDir = (vacSort.col && vSortKey[vacSort.col]) ? vacSort.dir : -1;
     vacOnly.sort((a, b) => {
@@ -2933,11 +2946,30 @@ function renderVacDetail() {
       if (!propGroupMap[cu.property]) propGroupMap[cu.property] = [];
       propGroupMap[cu.property].push(cu);
     });
+    // Sort map for Turn Cost chip columns
+    const costSortMap = {
+      property:      x => (x.property || '').toLowerCase(),
+      unit:          x => (x.unit || '').toLowerCase(),
+      days_vacant:   x => parseInt(x.r&&x.r.days_vacant)||0,
+      available:     x => x.miDate ? x.miDate.getTime() : 0,
+      move_out:      x => x.moDate ? x.moDate.getTime() : 0,
+      insp_date:     x => { const uk=x.property+'|'+normUnit(x.unit); const cands=inspByUnit[uk]||[]; const match=cands.find(ir=>{const id=parseDate(ir.insp_date);return id&&x.moDate&&Math.abs((id-x.moDate)/864e5)<=30;}); return match?match.insp_date||'':''; },
+      cost_total:    x => x.total,
+      cost_maint:    x => x.maint,
+      cost_paint:    x => x.paint,
+      cost_floor:    x => x.floor,
+      cost_remodel:  x => x.remodel,
+      cost_appliance:x => x.appliance,
+      cost_clean:    x => x.clean,
+    };
+    const cSortFn  = costSortMap[vacSort.col] || (x => x.total);
+    const cSortDir = (vacSort.col && costSortMap[vacSort.col]) ? vacSort.dir : -1;
+
     const propList = Object.entries(propGroupMap).map(([prop, units], pi) => {
-      units.sort((a,b) => b.total - a.total);
+      units.sort((a,b) => { const av=cSortFn(a),bv=cSortFn(b); return (typeof av==='string'?av.localeCompare(bv):av-bv)*cSortDir; });
       const total = units.reduce((s,u) => s+u.total, 0);
       return { prop, units, total, avg: units.length ? total/units.length : 0 };
-    }).sort((a,b) => b.total - a.total);
+    }).sort((a,b) => { const av=cSortFn({property:a.prop,unit:'',total:a.total,maint:0,paint:0,floor:0,clean:0,remodel:0,appliance:0,moDate:null,miDate:null,r:null})||a.total; const bv=cSortFn({property:b.prop,unit:'',total:b.total,maint:0,paint:0,floor:0,clean:0,remodel:0,appliance:0,moDate:null,miDate:null,r:null})||b.total; return typeof av==='string'?av.localeCompare(bv)*cSortDir:(bv-av)*Math.abs(cSortDir); });
 
     const fmtA = v => v > 0 ? '$' + v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) : '—';
     const NCols = 15;
