@@ -911,7 +911,7 @@ tbody td { padding: 6px 8px; color: #333; font-size: 12px; }
             <div class="chip"   id="vac-vs-cost" onclick="setVacView('cost')">💰 Turn Cost</div>
             <div class="chip"   id="vac-vs-trend" onclick="setVacView('trend')">📈 Trend</div>
           </div>
-          <div id="vac-cost-ctrl" style="display:none;margin-left:auto;gap:6px">
+          <div id="vac-cost-ctrl" style="visibility:hidden;margin-left:8px;gap:6px;display:flex">
             <button onclick="collapseAllCost()" style="font-size:11px;padding:3px 10px;border:1px solid #ddd;border-radius:12px;background:white;cursor:pointer;color:#555">⊖ Collapse All</button>
           </div>
         </div>
@@ -2479,7 +2479,7 @@ function renderVac() {
 function setVacView(sv) {
   vacView = sv;
   const ctrl = $('vac-cost-ctrl');
-  if (ctrl) ctrl.style.display = sv === 'cost' ? 'flex' : 'none';
+  if (ctrl) ctrl.style.visibility = sv === 'cost' ? 'visible' : 'hidden';
   ['prop','vdet','cost','trend'].forEach(k => {
     const el = $('vac-vs-' + k); if (el) el.classList.toggle('on', k === sv);
   });
@@ -2544,6 +2544,20 @@ function renderVacDetail() {
   };
   let src = vacPOD ? lfVacRows.filter(r => r.pod === vacPOD) : lfVacRows;
   let head = '', body = '', colspan = 7;
+
+  // Build unit → AppFolio link lookup from vacancy data (has property_id + unit_id)
+  const _unitLinkMap = {};
+  lfVacRows.forEach(r => {
+    if (r.property_id && r.unit_id && r.unit)
+      _unitLinkMap[r.property + '|' + normUnit(r.unit)] = { p: r.property_id, u: r.unit_id };
+  });
+  const mkUnitLink = (property, unit) => {
+    const info = _unitLinkMap[property + '|' + normUnit(unit || '')];
+    const label = unit || '—';
+    if (!info || !info.u) return label;
+    const url = 'https://kmcprops.appfolio.com/properties/' + info.p + '/units/' + info.u;
+    return '<a href="' + url + '" target="_blank" style="color:#1565c0;text-decoration:underline dotted;font-weight:600" onclick="event.stopPropagation()">' + label + '</a>';
+  };
 
   const vacSortArrow = col => vacSort.col === col ? (vacSort.dir === 1 ? ' ↑' : ' ↓') : '';
   const vacTh = (label, col, align) => {
@@ -3094,7 +3108,7 @@ function renderVacDetail() {
 
         return '<tr id="vrow_' + drillId + '" style="background:#fafbfc">' +
           '<td style="border-left:3px solid #c0cfe0;width:20px"></td>' +
-          '<td style="font-size:12px;font-weight:600">' + u.unit + (isVacant ? ' <span style="font-size:8px;color:#c62828;font-weight:700">●</span>' : '') + '</td>' +
+          '<td style="font-size:12px;font-weight:600">' + mkUnitLink(u.property, u.unit) + (isVacant ? ' <span style="font-size:8px;color:#c62828;font-weight:700">●</span>' : '') + '</td>' +
           '<td style="text-align:center;font-size:11px;color:#555">' + moStr +
             (u.vacRow && u.vacRow.last_rent ? '<br><span style="font-size:10px;color:#888">Last: $' + parseFloat(u.vacRow.last_rent).toLocaleString('en-US',{maximumFractionDigits:0}) + '</span>' : '<br><span style="font-size:10px;color:#bbb">No last rent</span>') +
             '</td>' +
@@ -3139,7 +3153,7 @@ function renderVacDetail() {
     const totalUnits = propList.reduce((s,p)=>s+p.units.length, 0);
     // Inject Collapse All / Expand All into the panel header area
     const ctrlBar = $('vac-cost-ctrl');
-    if (ctrlBar) ctrlBar.style.display = 'flex';
+    if (ctrlBar) ctrlBar.style.visibility = 'visible';
     const footer2 = $('vac-detail-footer');
     if (footer2) footer2.textContent = propList.length + ' properties · ' + totalUnits + ' units · Total turn spend: ' + fmtA(grandTotal) + ' (180-day window)';
 
@@ -3213,11 +3227,11 @@ function renderVacDetail() {
       const moStr = moDate ? moDate.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
       return '<tr id="vrow_' + vdrillId + '">' +
         `<td>${r.property||'—'}${badgeI(r.internet)}${badgeW(r.website)}</td>
-        <td style="font-size:12px;color:#555">${r.unit||'—'}</td>
+        <td style="font-size:12px">${mkUnitLink(r.property, r.unit)}</td>
         <td style="text-align:center;font-size:12px">${bedBath}</td>
+        <td style="text-align:center;font-size:12px;color:#555">${moStr}</td>
         <td style="text-align:center;font-weight:700;color:${dvColor(r.days_vacant)}">${r.days_vacant||'—'}</td>
         <td style="text-align:right;font-weight:700;color:#8b4513">${(()=>{ const dv=parseInt(r.days_vacant)||0,mr=parseFloat(r.market_rent)||0; return dv&&mr?'$'+(dv*(mr/30)).toLocaleString('en-US',{maximumFractionDigits:0}):'—'; })()}</td>
-        <td style="text-align:center;font-size:12px;color:#555">${moStr}</td>
         <td style="font-size:12px;color:#2e7d32;font-weight:600">${miStr}</td>
         ${mkInspCell(unitKey, moDate, miDate, r.inspection)}` +
         mkVdCellTotal(allBills) +
