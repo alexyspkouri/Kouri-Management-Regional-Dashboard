@@ -2623,9 +2623,13 @@ function renderVacDetail() {
     // Pre-compute bill totals per unit for sort keys that need them
     const _vdetTotals = {};
     if (['total_cost','maint_status','paint_status','floor_status','remodel_status','appliance_status','clean_status'].includes(vacSort.col)) {
+      // Build local SMI lookup for miDate (costMiLookup lives inside cost view block)
+      const _smiLookup = {};
+      lfSMIRows.forEach(s => { if (s.property && s.unit && s.move_in) { const k=s.property+'|'+normUnit(s.unit); const d=parseDate(s.move_in); if (d&&(!_smiLookup[k]||d>_smiLookup[k])) _smiLookup[k]=d; }});
       vacOnly.forEach(r => {
         const uk = r.property + '|' + normUnit(r.unit);
-        const mo = parseDate(r.last_move_out), mi = costMiLookup ? (costMiLookup[uk]||null) : null;
+        const mo = parseDate(r.last_move_out);
+        const mi = _smiLookup[uk] || (r.next_move_in ? parseDate(r.next_move_in) : null);
         const sum = cat => getUnitBills(uk, cat, mo, mi).reduce((s,b)=>s+b.amount,0);
         _vdetTotals[uk] = { total: ['maint','paint','floor','clean','remodel','appliance'].reduce((s,c)=>s+sum(c),0),
           maint:sum('maint'), paint:sum('paint'), floor:sum('floor'),
