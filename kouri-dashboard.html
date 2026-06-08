@@ -3110,11 +3110,10 @@ function renderVacDetail() {
       const total = units.reduce((s,u) => s+u.total, 0);
       return { prop, units, total, avg: units.length ? total/units.length : 0 };
     }).sort((a,b) => {
-      // Sort properties — use simple fields that are always safe
-      if (sortCol === 'property') return a.prop.localeCompare(b.prop) * cSortDir;
-      // For cost columns, sort by property average of that column
+      const _sc = vacSort.col;
+      if (_sc === 'property') return a.prop.localeCompare(b.prop) * cSortDir;
       const costCols = {cost_total:'total',cost_maint:'maint',cost_paint:'paint',cost_floor:'floor',cost_remodel:'remodel',cost_appliance:'appliance',cost_clean:'clean'};
-      if (costCols[sortCol]) { const k=costCols[sortCol]; return (b.units.reduce((s,u)=>s+(u[k]||0),0)/b.units.length - a.units.reduce((s,u)=>s+(u[k]||0),0)/a.units.length)*cSortDir; }
+      if (costCols[_sc]) { const k=costCols[_sc]; return (b.units.reduce((s,u)=>s+(u[k]||0),0)/b.units.length - a.units.reduce((s,u)=>s+(u[k]||0),0)/a.units.length)*cSortDir; }
       return (b.total - a.total) * Math.abs(cSortDir);
     });
 
