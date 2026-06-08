@@ -1911,17 +1911,18 @@ async function loadRetEvents() {
   } catch(e) { console.warn('Retention Events load failed:', e); }
 }
 
-function toggleRetDrill(ym, eventType, podFilter) {
+function toggleRetDrill(el, ym, eventType, podFilter) {
   const id = 'retdrill_' + ym + '_' + eventType;
   const existing = $(id);
+  const existingRow = $(id + '-row');
   // Close if same drill open
   if (_openRetDrill === id) {
-    if (existing) existing.remove();
+    if (existingRow) existingRow.remove();
     _openRetDrill = null;
     return;
   }
   // Close previous
-  if (_openRetDrill) { const prev = $(_openRetDrill); if (prev) prev.remove(); }
+  if (_openRetDrill) { const prevRow = $(_openRetDrill + '-row'); if (prevRow) prevRow.remove(); }
   _openRetDrill = id;
 
   // Filter events
@@ -1962,12 +1963,8 @@ function toggleRetDrill(ym, eventType, podFilter) {
 
   // Insert after the clicked row's parent <tr> using the event target
   // Caller should pass the element via event, but we find it by data attribute
-  const key = ym + '_' + eventType;
-  const triggerEl = document.querySelector('[data-retdrill="' + key + '"]');
-  if (triggerEl) {
-    const tr = triggerEl.closest('tr');
-    if (tr) tr.insertAdjacentHTML('afterend', '<tr><td colspan="7" style="padding:0">' + html + '</td></tr>');
-  }
+  const tr = el ? el.closest('tr') : null;
+  if (tr) tr.insertAdjacentHTML('afterend', '<tr id="' + id + '-row"><td colspan="7" style="padding:0">' + html + '</td></tr>');
 }
 
 async function loadRETMonthly() {
@@ -2251,7 +2248,7 @@ function renderRETMonthly(rows) {
     const drillCell = (n, color, evtType, ym, pod) => {
       if (!n) return `<td style="text-align:center;color:#bbb">—</td>`;
       const pArg = pod ? "'" + pod.replace(/'/g,"\'") + "'" : 'null';
-      return `<td onclick="toggleRetDrill('${ym}','${evtType}',${pArg})"
+      return `<td onclick="toggleRetDrill(this,'${ym}','${evtType}',${pArg})"
         style="text-align:center;color:${color};font-weight:600;cursor:pointer;text-decoration:underline dotted">${n}</td>`;
     };
 
