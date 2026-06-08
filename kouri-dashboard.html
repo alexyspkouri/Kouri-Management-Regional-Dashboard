@@ -3103,7 +3103,14 @@ function renderVacDetail() {
       units.sort((a,b) => { const av=cSortFn(a),bv=cSortFn(b); return (typeof av==='string'?av.localeCompare(bv):av-bv)*cSortDir; });
       const total = units.reduce((s,u) => s+u.total, 0);
       return { prop, units, total, avg: units.length ? total/units.length : 0 };
-    }).sort((a,b) => { const av=cSortFn({property:a.prop,unit:'',total:a.total,maint:0,paint:0,floor:0,clean:0,remodel:0,appliance:0,moDate:null,miDate:null,r:null})||a.total; const bv=cSortFn({property:b.prop,unit:'',total:b.total,maint:0,paint:0,floor:0,clean:0,remodel:0,appliance:0,moDate:null,miDate:null,r:null})||b.total; return typeof av==='string'?av.localeCompare(bv)*cSortDir:(bv-av)*Math.abs(cSortDir); });
+    }).sort((a,b) => {
+      // Sort properties — use simple fields that are always safe
+      if (sortCol === 'property') return a.prop.localeCompare(b.prop) * cSortDir;
+      // For cost columns, sort by property average of that column
+      const costCols = {cost_total:'total',cost_maint:'maint',cost_paint:'paint',cost_floor:'floor',cost_remodel:'remodel',cost_appliance:'appliance',cost_clean:'clean'};
+      if (costCols[sortCol]) { const k=costCols[sortCol]; return (b.units.reduce((s,u)=>s+(u[k]||0),0)/b.units.length - a.units.reduce((s,u)=>s+(u[k]||0),0)/a.units.length)*cSortDir; }
+      return (b.total - a.total) * Math.abs(cSortDir);
+    });
 
     const fmtA = v => v > 0 ? '$' + v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) : '—';
     const NCols = 15;
