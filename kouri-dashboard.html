@@ -419,9 +419,15 @@ tbody td { padding: 6px 8px; color: #333; font-size: 12px; }
   </div>
   <div class="header-right">
     <div class="header-meta" id="lastUpdated">Loading data…</div>
-    <button id="refreshBtn" title="Sync data from AppFolio">
-      <span id="refreshBtnIcon">⟳</span> Refresh
-    </button>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button id="refreshBtn" title="Full sync — all data, retention, turns (~5 min)">
+        <span id="refreshBtnIcon">⟳</span> Full Sync
+      </button>
+      <button id="refreshBtnLite" title="Lite sync — daily operational data (~1.5 min)"
+        style="display:flex;align-items:center;gap:6px;background:rgba(0,97,64,0.3);border:1px solid rgba(0,168,107,0.35);color:#7eeec4;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer">
+        ⚡ Lite
+      </button>
+    </div>
   </div>
 </div>
 <!-- Sync Progress Bar -->
@@ -4796,6 +4802,24 @@ async function loadLastSync() {
         pct.style.color = '';
       }, success ? 1200 : 3500);
     }
+    async function doSync(mode) {
+      const isLite = mode === 'lite';
+      const btn = isLite ? $('refreshBtnLite') : refreshBtn;
+      if (!btn) return;
+      const orig = btn.innerHTML;
+      btn.innerHTML = isLite ? '⚡ Syncing…' : '<span>⟳</span> Syncing…';
+      btn.disabled = true;
+      if (!isLite) refreshBtn.disabled = true;
+      startProgressBar();
+      try {
+        const response = await fetch(CLOUD_FUNCTION_URL + '?mode=' + mode, { method: 'POST' });
+        const result = await response.json();
+        if (response.ok) { finishProgressBar(true); setTimeout(() => location.reload(), 1200); }
+        else { finishProgressBar(false); setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; refreshBtn.disabled = false; }, 3500); }
+      } catch (error) { finishProgressBar(false); setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; refreshBtn.disabled = false; }, 3500); }
+    }
+    const liteBtn = $('refreshBtnLite');
+    if (liteBtn) liteBtn.addEventListener('click', () => doSync('lite'));
     refreshBtn.addEventListener('click', async function() {
       refreshBtn.innerHTML = '<span id="refreshBtnIcon">⟳</span> Syncing…';
       refreshBtn.disabled = true;
