@@ -1941,8 +1941,8 @@ function toggleRetDrill(el, ym, eventType, podFilter) {
     <td style="font-size:11px;font-weight:600">${e.occupancy_id
       ? '<a href="https://kmcprops.appfolio.com/occupancies/'+e.occupancy_id+'" target="_blank" style="color:#1565c0;text-decoration:underline dotted" onclick="event.stopPropagation()">'+( e.tenant||'—')+'</a>'
       : (e.tenant||'—')}</td>
-    <td style="font-size:11px;color:#555">${e.property||'—'}</td>
-    <td style="font-size:11px;color:#555">${e.unit||'—'}</td>
+    <td style="font-size:11px;color:#555">${e.property_id ? '<a href="https://kmcprops.appfolio.com/properties/'+e.property_id+'" target="_blank" style="color:#555;text-decoration:underline dotted" onclick="event.stopPropagation()">'+(e.property||'—')+'</a>' : (e.property||'—')}</td>
+    <td style="font-size:11px;color:#555">${e.property_id && e.unit_id ? '<a href="https://kmcprops.appfolio.com/properties/'+e.property_id+'/units/'+e.unit_id+'" target="_blank" style="color:#555;text-decoration:underline dotted" onclick="event.stopPropagation()">'+(e.unit||'—')+'</a>' : (e.unit||'—')}</td>
     <td style="font-size:11px;color:#888">${e.pod||'—'}</td>
     <td style="font-size:11px;white-space:nowrap">${fmtD(e.event_date)}</td>
     <td style="font-size:11px;white-space:nowrap;color:#2e7d32">${e.lease_end ? fmtD(e.lease_end) : '—'}</td>
