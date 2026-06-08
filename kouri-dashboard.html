@@ -1039,6 +1039,7 @@ const GIDS = {
   retention:        '82038347',
   retentionMonthly: '5709581',
   retentionHistory: '306861938',
+  retentionEvents:  '000000000',  // set after first sync
   leasingFunnel:    '47064229',
   lfGuestCards:     '740225880',
   lfShowings:       '413531120',
@@ -1852,6 +1853,8 @@ function clearPOD(tab) {
 }
 // ─── TENANT RETENTION ────────────────────────────────────────────────
 let retRows = [], retPOD = null, retView = 'hist';
+let retEventRows = [];  // individual tenant events for monthly drill-down
+let _openRetDrill = null;
 let retMonthlyRows = [];   // pre-computed monthly aggregates from Retention Monthly sheet tab
 let retHistoryRows = [];   // pre-computed historical retention rates from Retention History sheet tab
 let retPodSrt = { col: 'rate', dir: -1 };
@@ -1883,6 +1886,87 @@ async function loadRET() {
     $('ret-loading').style.display = 'none';
     $('ret-error').style.display   = '';
     console.error('RET error:', e);
+  }
+}
+
+async function loadRetEvents() {
+  if (GIDS.retentionEvents === '000000000') return;
+  try {
+    const raw = await fetchGViz(GIDS.retentionEvents);
+    retEventRows = raw.map(r => ({
+      ym:          r['Year-Month']  || '',
+      event_type:  r['Event Type']  || '',
+      tenant:      r['Tenant']      || '',
+      property:    r['Property']    || '',
+      pod:         r['POD']         || '',
+      unit:        r['Unit']        || '',
+      event_date:  r['Event Date']  || '',
+      lease_start: r['Lease Start'] || '',
+      lease_end:   r['Lease End']   || '',
+      move_in:     r['Move In']     || '',
+      move_out:    r['Move Out']    || '',
+    })).filter(r => r.ym && r.event_type);
+    if (ACCESS_PODS) retEventRows = accessFilter(retEventRows);
+    console.log('[Retention Events] Rows loaded:', retEventRows.length);
+  } catch(e) { console.warn('Retention Events load failed:', e); }
+}
+
+function toggleRetDrill(ym, eventType, podFilter) {
+  const id = 'retdrill_' + ym + '_' + eventType;
+  const existing = $(id);
+  // Close if same drill open
+  if (_openRetDrill === id) {
+    if (existing) existing.remove();
+    _openRetDrill = null;
+    return;
+  }
+  // Close previous
+  if (_openRetDrill) { const prev = $(_openRetDrill); if (prev) prev.remove(); }
+  _openRetDrill = id;
+
+  // Filter events
+  let events = retEventRows.filter(r => r.ym === ym && r.event_type === eventType);
+  if (podFilter) events = events.filter(r => r.pod === podFilter);
+  events.sort((a,b) => (a.property||'').localeCompare(b.property||''));
+
+  const fmtD = s => { const d=parseDate(s); return d?d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'—'; };
+  const labels = { move_in:'Move Ins', move_out:'Move Outs', renewal:'Renewals',
+                   pending_renewal:'Pending Renewals', expiring:'Leases Expiring' };
+
+  const rows = events.map(e => `<tr style="border-bottom:1px solid #eee">
+    <td style="font-size:11px;font-weight:600">${e.tenant||'—'}</td>
+    <td style="font-size:11px;color:#555">${e.property||'—'}</td>
+    <td style="font-size:11px;color:#555">${e.unit||'—'}</td>
+    <td style="font-size:11px;color:#888">${e.pod||'—'}</td>
+    <td style="font-size:11px;white-space:nowrap">${fmtD(e.event_date)}</td>
+    <td style="font-size:11px;white-space:nowrap;color:#2e7d32">${e.lease_end ? fmtD(e.lease_end) : '—'}</td>
+  </tr>`).join('');
+
+  const html = `<div id="${id}" style="background:#f8fbff;border-top:2px solid #006140;padding:10px 18px 14px">
+    <div style="font-size:11px;font-weight:700;color:#006140;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">
+      ${labels[eventType]||eventType} — ${ym} (${events.length} tenant${events.length!==1?'s':''})
+    </div>
+    ${events.length === 0 ? '<div style="color:#aaa;font-size:12px">No detail data yet — run a sync to populate Retention Events.</div>' :
+    `<table style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:#e8f5e9">
+        <th style="padding:4px 8px;text-align:left;font-size:10px;color:#555;text-transform:uppercase">Tenant</th>
+        <th style="padding:4px 8px;text-align:left;font-size:10px;color:#555;text-transform:uppercase">Property</th>
+        <th style="padding:4px 8px;text-align:left;font-size:10px;color:#555;text-transform:uppercase">Unit</th>
+        <th style="padding:4px 8px;text-align:left;font-size:10px;color:#555;text-transform:uppercase">POD</th>
+        <th style="padding:4px 8px;text-align:left;font-size:10px;color:#555;text-transform:uppercase">Event Date</th>
+        <th style="padding:4px 8px;text-align:left;font-size:10px;color:#555;text-transform:uppercase">Lease End</th>
+      </tr></thead>
+      <tbody style="background:white">${rows}</tbody>
+    </table>`}
+  </div>`;
+
+  // Insert after the clicked row's parent <tr> using the event target
+  // Caller should pass the element via event, but we find it by data attribute
+  const key = ym + '_' + eventType;
+  const triggerEl = document.querySelector('[data-retdrill="' + key + '"]');
+  if (triggerEl) {
+    const tr = triggerEl.closest('tr');
+    if (tr) tr.insertAdjacentHTML('afterend', '<tr><td colspan="7" style="padding:0">' + html + '</td></tr>');
   }
 }
 
@@ -2164,16 +2248,22 @@ function renderRETMonthly(rows) {
     const cell = (n, color) => n > 0
       ? `<td style="text-align:center;color:${color};font-weight:600">${n}</td>`
       : `<td style="text-align:center;color:#bbb">—</td>`;
+    const drillCell = (n, color, evtType, ym, pod) => {
+      if (!n) return `<td style="text-align:center;color:#bbb">—</td>`;
+      const pArg = pod ? "'" + pod.replace(/'/g,"\'") + "'" : 'null';
+      return `<td onclick="toggleRetDrill('${ym}','${evtType}',${pArg})"
+        style="text-align:center;color:${color};font-weight:600;cursor:pointer;text-decoration:underline dotted">${n}</td>`;
+    };
 
     $('ret-monthly-body').innerHTML = sorted.map(m => `
       <tr style="${m.isCurrent ? 'background:#f0f7f0;font-weight:600' : ''}">
         <td style="white-space:nowrap">${fmt(m.ym)}${m.isCurrent ? ' <span style="font-size:10px;color:#888;font-weight:400">(current)</span>' : ''}</td>
-        ${cell(m.active,          '#2e7d32')}
-        ${cell(m.expiring,        '#e65100')}
-        ${cell(m.moveOuts,        '#c62828')}
-        ${cell(m.pendingRenewals, '#f57c00')}
-        ${cell(m.renewals,        '#6a1b9a')}
-        ${cell(m.moveIns,         '#1565c0')}
+        ${cell(m.active,                                            '#2e7d32')}
+        ${drillCell(m.expiring,        '#e65100', 'expiring',        m.ym, retPOD||null)}
+        ${drillCell(m.moveOuts,        '#c62828', 'move_out',        m.ym, retPOD||null)}
+        ${drillCell(m.pendingRenewals, '#f57c00', 'pending_renewal', m.ym, retPOD||null)}
+        ${drillCell(m.renewals,        '#6a1b9a', 'renewal',         m.ym, retPOD||null)}
+        ${drillCell(m.moveIns,         '#1565c0', 'move_in',         m.ym, retPOD||null)}
       </tr>`).join('');
     return;
   }
@@ -4720,6 +4810,7 @@ async function loadLastSync() {
   if (GIDS.lfGuestCards !== '000000000') loaders.push(loadLF());
   await Promise.all(loaders);
   if (GIDS.retentionMonthly !== '000000000') loadRETMonthly();
+  if (GIDS.retentionEvents !== '000000000') loadRetEvents();
   if (GIDS.retentionHistory !== '000000000') loadRETHistory();
   loadLastSync();  // update header timestamp to last sync time
 })();
