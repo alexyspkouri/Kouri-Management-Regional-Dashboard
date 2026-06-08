@@ -1904,9 +1904,9 @@ async function loadRetEvents() {
       lease_end:   r['Lease End']   || '',
       move_in:     r['Move In']     || '',
       move_out:     r['Move Out']    || '',
-      occupancy_id: String(r['Occupancy ID'] || ''),
-      unit_id:      String(r['Unit ID']      || ''),
-      property_id:  String(r['Property ID']  || ''),
+      occupancy_id: String(r['Occupancy ID'] || r['L'] || ''),
+      unit_id:      String(r['Unit ID']      || r['M'] || ''),
+      property_id:  String(r['Property ID']  || r['N'] || ''),
     })).filter(r => r.ym && r.event_type);
     if (ACCESS_PODS) retEventRows = accessFilter(retEventRows);
     console.log('[Retention Events] Rows loaded:', retEventRows.length);
