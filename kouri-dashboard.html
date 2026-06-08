@@ -2620,23 +2620,12 @@ function renderVacDetail() {
       remodel_status:   r => _vdetTotal(r,'remodel'),
       appliance_status: r => _vdetTotal(r,'appliance'),
     };
-    // Pre-compute bill totals per unit for sort keys that need them
-    const _vdetTotals = {};
-    if (['total_cost','maint_status','paint_status','floor_status','remodel_status','appliance_status','clean_status'].includes(vacSort.col)) {
-      // Build local SMI lookup for miDate (costMiLookup lives inside cost view block)
-      const _smiLookup = {};
-      lfSMIRows.forEach(s => { if (s.property && s.unit && s.move_in) { const k=s.property+'|'+normUnit(s.unit); const d=parseDate(s.move_in); if (d&&(!_smiLookup[k]||d>_smiLookup[k])) _smiLookup[k]=d; }});
-      vacOnly.forEach(r => {
-        const uk = r.property + '|' + normUnit(r.unit);
-        const mo = parseDate(r.last_move_out);
-        const mi = _smiLookup[uk] || (r.next_move_in ? parseDate(r.next_move_in) : null);
-        const sum = cat => getUnitBills(uk, cat, mo, mi).reduce((s,b)=>s+b.amount,0);
-        _vdetTotals[uk] = { total: ['maint','paint','floor','clean','remodel','appliance'].reduce((s,c)=>s+sum(c),0),
-          maint:sum('maint'), paint:sum('paint'), floor:sum('floor'),
-          clean:sum('clean'), remodel:sum('remodel'), appliance:sum('appliance') };
-      });
-    }
-    const _vdetTotal = (r, cat) => { const t=_vdetTotals[r.property+'|'+normUnit(r.unit)]; return t?(t[cat]||0):0; };
+    // Bill amount sort keys computed after getUnitBills is defined (see _vdetTotal2 below)
+    const _vdetTotal = (r, cat) => {
+      // Called during sort — getUnitBills and billsByUnitCat are defined later in the else block
+      // so we return 0 here; bill sorts run a second pass after those are defined
+      return 0;
+    };
     const vSortFn  = vSortKey[vacSort.col] || (r => parseInt(r.days_vacant) || 0);
     const vSortDir = (vacSort.col && vSortKey[vacSort.col]) ? vacSort.dir : -1;
     vacOnly.sort((a, b) => {
@@ -2758,6 +2747,25 @@ function renderVacDetail() {
         return true;
       });
     };
+
+    // Bill-amount sort: re-sort vacOnly now that getUnitBills is available
+    const BILL_SORT_COLS = { total_cost:'_all', maint_status:'maint', paint_status:'paint',
+      floor_status:'floor', remodel_status:'remodel', appliance_status:'appliance', clean_status:'clean' };
+    if (BILL_SORT_COLS[vacSort.col]) {
+      const billSortDir = vacSort.dir || -1;
+      vacOnly.sort((a, b) => {
+        const getTotal = r => {
+          const uk = r.property + '|' + normUnit(r.unit);
+          const mo = parseDate(r.last_move_out);
+          const mi = lfSMIRows.find(s=>s.property===r.property&&normUnit(s.unit)===normUnit(r.unit)&&s.move_in);
+          const miDate = mi ? parseDate(mi.move_in) : (r.next_move_in ? parseDate(r.next_move_in) : null);
+          const cat = BILL_SORT_COLS[vacSort.col];
+          if (cat === '_all') return ['maint','paint','floor','clean','remodel','appliance'].reduce((s,c)=>s+getUnitBills(uk,c,mo,miDate).reduce((ss,b)=>ss+b.amount,0),0);
+          return getUnitBills(uk, cat, mo, miDate).reduce((s,b)=>s+b.amount,0);
+        };
+        return (getTotal(a) - getTotal(b)) * billSortDir;
+      });
+    }
 
     // Inspection cell: best match within ±30 days of move-out and before move-in.
     // Falls back to make-ready field.
