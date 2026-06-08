@@ -1938,7 +1938,9 @@ function toggleRetDrill(el, ym, eventType, podFilter) {
                    pending_renewal:'Pending Renewals', expiring:'Leases Expiring' };
 
   const rows = events.map(e => `<tr style="border-bottom:1px solid #eee">
-    <td style="font-size:11px;font-weight:600">${e.tenant||'—'}</td>
+    <td style="font-size:11px;font-weight:600">${e.occupancy_id
+      ? '<a href="https://kmcprops.appfolio.com/occupancies/'+e.occupancy_id+'" target="_blank" style="color:#1565c0;text-decoration:underline dotted" onclick="event.stopPropagation()">'+( e.tenant||'—')+'</a>'
+      : (e.tenant||'—')}</td>
     <td style="font-size:11px;color:#555">${e.property||'—'}</td>
     <td style="font-size:11px;color:#555">${e.unit||'—'}</td>
     <td style="font-size:11px;color:#888">${e.pod||'—'}</td>
