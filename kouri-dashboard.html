@@ -4849,4 +4849,23 @@ async function loadLastSync() {
           finishProgressBar(false);
           console.error('Sync error:', result);
           setTimeout(() => {
-            refreshBtn.in
+            refreshBtn.innerHTML = '<span id="refreshBtnIcon">⟳</span> Refresh';
+            refreshBtn.disabled = false;
+          }, 3500);
+        }
+      } catch (error) {
+        finishProgressBar(false);
+        console.error('Request error:', error);
+        setTimeout(() => {
+          refreshBtn.innerHTML = '<span id="refreshBtnIcon">⟳</span> Refresh';
+          refreshBtn.disabled = false;
+        }, 3500);
+      }
+    });
+  }
+  loadDQ();
+  loadWO();
+})();
+</script>
+</body>
+</html>
