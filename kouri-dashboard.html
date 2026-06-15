@@ -4865,6 +4865,11 @@ async function loadLastSync() {
   }
   loadDQ();
   loadWO();
+  loadLastSync();
+  // Background loads — populate data before user opens those tabs
+  if (GIDS.retentionMonthly !== '000000000') loadRETMonthly();
+  if (GIDS.retentionHistory !== '000000000') loadRETHistory();
+  loadRetEvents();
 })();
 </script>
 </body>
