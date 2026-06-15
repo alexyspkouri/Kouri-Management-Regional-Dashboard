@@ -4851,4 +4851,70 @@ async function loadLastSync() {
     function finishProgressBar(success) {
       clearSyncTimers();
       const bar   = $('sync-bar-fill');
-    
+      const label = $('sync-step-label');
+      const pct   = $('sync-pct-label');
+      const prog  = $('sync-progress');
+      bar.style.width = '100%';
+      bar.className = success ? 'done' : 'error';
+      pct.style.color = success ? '#7eeec4' : '#ef9a9a';
+      pct.textContent = '100%';
+      label.textContent = success ? '✓ Sync complete — reloading…' : '✕ Sync failed';
+      setTimeout(() => {
+        prog.classList.remove('visible');
+        bar.style.width = '0%';
+        bar.className = '';
+        pct.style.color = '';
+      }, success ? 1200 : 3500);
+    }
+    async function doSync(mode) {
+      const isLite = mode === 'lite';
+      const btn = isLite ? $('refreshBtnLite') : refreshBtn;
+      if (!btn) return;
+      const orig = btn.innerHTML;
+      btn.innerHTML = isLite ? '⚡ Syncing…' : '<span>⟳</span> Syncing…';
+      btn.disabled = true;
+      if (!isLite) refreshBtn.disabled = true;
+      startProgressBar();
+      try {
+        const response = await fetch(CLOUD_FUNCTION_URL + '?mode=' + mode, { method: 'POST' });
+        const result = await response.json();
+        if (response.ok) { finishProgressBar(true); setTimeout(() => location.reload(), 1200); }
+        else { finishProgressBar(false); setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; refreshBtn.disabled = false; }, 3500); }
+      } catch (error) { finishProgressBar(false); setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; refreshBtn.disabled = false; }, 3500); }
+    }
+    const liteBtn = $('refreshBtnLite');
+    if (liteBtn) liteBtn.addEventListener('click', () => doSync('lite'));
+    refreshBtn.addEventListener('click', async function() {
+      refreshBtn.innerHTML = '<span id="refreshBtnIcon">⟳</span> Syncing…';
+      refreshBtn.disabled = true;
+      startProgressBar();
+      try {
+        const response = await fetch(CLOUD_FUNCTION_URL, { method: 'POST' });
+        const result   = await response.json();
+        if (response.ok) {
+          finishProgressBar(true);
+          setTimeout(() => location.reload(), 1200);
+        } else {
+          finishProgressBar(false);
+          console.error('Sync error:', result);
+          setTimeout(() => {
+            refreshBtn.innerHTML = '<span id="refreshBtnIcon">⟳</span> Refresh';
+            refreshBtn.disabled = false;
+          }, 3500);
+        }
+      } catch (error) {
+        finishProgressBar(false);
+        console.error('Request error:', error);
+        setTimeout(() => {
+          refreshBtn.innerHTML = '<span id="refreshBtnIcon">⟳</span> Refresh';
+          refreshBtn.disabled = false;
+        }, 3500);
+      }
+    });
+  }
+  loadDQ();
+  loadWO();
+})();
+</script>
+</body>
+</html>
