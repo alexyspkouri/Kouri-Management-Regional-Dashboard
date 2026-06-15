@@ -3445,15 +3445,24 @@ function toggleCostDrill(drillId, cat) {
                      floor:'Flooring', clean:'Cleaning', remodel:'Remodel', appliance:'Appliances', other:'Other' };
   const fmtD = d => d ? d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
   const fmtA = v => '$' + Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const afBillUrl = (_ref, amt) => amt
+    ? `https://kmcprops.appfolio.com/search/advanced_search?full_text_search=${Number(amt).toFixed(2)}&section_keys=transactions&result_types=payable_invoice%2Cpayable_payment`
+    : null;
 
-  const rows = filtered.map(b => `<tr style="border-bottom:1px solid #e8f0fe">
+  const rows = filtered.map(b => {
+    const bUrl = afBillUrl(b.reference, b.amount);
+    const amtCell = bUrl
+      ? `<a href="${bUrl}" target="_blank" style="color:#1565c0;font-weight:700;font-size:12px;text-decoration:underline dotted">${fmtA(b.amount)}</a>`
+      : `<span style="font-weight:700;font-size:12px;color:#1565c0">${fmtA(b.amount)}</span>`;
+    return `<tr style="border-bottom:1px solid #e8f0fe">
     <td style="font-size:11px;color:#555;white-space:nowrap">${fmtD(b._date)}</td>
     <td style="font-size:11px;font-weight:600">${b.vendor||'—'}</td>
     <td style="font-size:11px;color:#555">${b.gl_account||'—'}</td>
     <td style="font-size:11px;color:#444;max-width:260px">${b.description||'—'}</td>
     <td style="font-size:11px;color:#555;white-space:nowrap">${b.payment_status||'—'}</td>
-    <td style="font-size:12px;font-weight:700;text-align:right;color:#1565c0">${fmtA(b.amount)}</td>
-  </tr>`).join('');
+    <td style="text-align:right">${amtCell}</td>
+  </tr>`;
+  }).join('');
 
   const total = filtered.reduce((s, b) => s + b.amount, 0);
 
@@ -3569,20 +3578,27 @@ function toggleVdetDrill(vdrillId, cat) {
   }
 
   // ── Table 2: Bills ────────────────────────────────────────────────
+  const afBillUrl2 = (_ref, amt) => amt
+    ? 'https://kmcprops.appfolio.com/search/advanced_search?full_text_search=' + Number(amt).toFixed(2) + '&section_keys=transactions&result_types=payable_invoice%2Cpayable_payment'
+    : null;
   let billTable = '';
   if (bills.length > 0) {
     const sortedBills = [...bills].sort((a,b) => (b._date||0) - (a._date||0));
     const billTotal = bills.reduce((s,b) => s + b.amount, 0);
-    const billRows = sortedBills.map(b =>
-      '<tr style="border-bottom:1px solid #eee">' +
+    const billRows = sortedBills.map(b => {
+      const bUrl = afBillUrl2(b.reference, b.amount);
+      const amtCell = bUrl
+        ? '<a href="' + bUrl + '" target="_blank" style="color:#1565c0;font-weight:700;font-size:12px;text-decoration:underline dotted">' + fmtA(b.amount) + '</a>'
+        : '<span style="font-weight:700;font-size:12px;color:#1565c0">' + fmtA(b.amount) + '</span>';
+      return '<tr style="border-bottom:1px solid #eee">' +
         '<td style="font-size:11px;white-space:nowrap">' + fmtD(b.bill_date) + '</td>' +
         '<td style="font-size:11px;font-weight:600">' + (b.vendor||'—') + '</td>' +
         '<td style="font-size:11px;color:#666">' + (b.gl_account||'—') + '</td>' +
         '<td style="font-size:11px;color:#444;max-width:200px">' + ((b.description||'').slice(0,40)||'—') + '</td>' +
         '<td style="font-size:11px;color:#555">' + (b.payment_status||'—') + '</td>' +
-        '<td style="font-size:12px;font-weight:700;text-align:right;color:#1565c0">' + fmtA(b.amount) + '</td>' +
-      '</tr>'
-    ).join('');
+        '<td style="text-align:right">' + amtCell + '</td>' +
+      '</tr>';
+    }).join('');
     billTable = '<div>' +
       '<div style="font-size:11px;font-weight:700;color:#1565c0;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px">Bills (' + bills.length + ')</div>' +
       '<table style="width:100%;border-collapse:collapse;font-size:12px">' +
@@ -4833,31 +4849,4 @@ async function loadLastSync() {
           finishProgressBar(false);
           console.error('Sync error:', result);
           setTimeout(() => {
-            refreshBtn.innerHTML = '<span id="refreshBtnIcon">⟳</span> Refresh';
-            refreshBtn.disabled = false;
-          }, 3500);
-        }
-      } catch (error) {
-        finishProgressBar(false);
-        console.error('Request error:', error);
-        setTimeout(() => {
-          refreshBtn.innerHTML = '<span id="refreshBtnIcon">⟳</span> Refresh';
-          refreshBtn.disabled = false;
-        }, 3500);
-      }
-    });
-  }
-  const loaders = [loadDQ(), loadWO()];
-  if (GIDS.receipts !== '000000000') loaders.push(loadRX());
-  if (GIDS.retention !== '000000000') loaders.push(loadRET());
-  if (GIDS.lfGuestCards !== '000000000') loaders.push(loadLF());
-  await Promise.all(loaders);
-  if (GIDS.retentionMonthly !== '000000000') loadRETMonthly();
-  loadRetEvents();
-  if (GIDS.retentionEvents !== '000000000') loadRetEvents();
-  if (GIDS.retentionHistory !== '000000000') loadRETHistory();
-  loadLastSync();  // update header timestamp to last sync time
-})();
-</script>
-</body>
-</html>
+            refreshBtn.in
