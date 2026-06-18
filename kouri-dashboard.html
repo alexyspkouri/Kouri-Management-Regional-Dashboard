@@ -462,6 +462,10 @@ tbody td { padding: 6px 8px; color: #333; font-size: 12px; }
     📋 Unit Turns
     <span class="tab-badge" id="vac-badge">—</span>
   </div>
+  <div class="tab-btn" id="tb-budget" onclick="showTab('budget')">
+    💰 Budget
+    <span class="tab-badge" id="budget-badge">—</span>
+  </div>
 </div>
 <!-- ═══════════════════ DQ TAB ═══════════════════ -->
 <div id="tab-dq" class="content">
@@ -878,6 +882,35 @@ tbody td { padding: 6px 8px; color: #333; font-size: 12px; }
     </div>
   </div>
 </div>
+<!-- ═══════════════════ BUDGET TAB ═══════════════════ -->
+<div id="tab-budget" class="content" style="display:none">
+  <div class="error-state" id="budget-error" style="display:none">
+    <div>⚠️ Could not load budget data.</div>
+  </div>
+  <div id="budget-loading" class="loading-state">
+    <div class="spinner"></div><br>Loading budget data…
+  </div>
+  <div id="budget-content" style="display:none">
+    <!-- Controls row -->
+    <div style="display:flex;align-items:center;gap:10px;padding:14px 18px 0;flex-wrap:wrap">
+      <div style="display:flex;gap:6px">
+        <button id="budget-mtd-btn" onclick="setBudgetPeriod('mtd')"
+          style="padding:5px 14px;border-radius:6px;border:1.5px solid #1565c0;background:#1565c0;color:#fff;font-size:12px;font-weight:600;cursor:pointer">MTD</button>
+        <button id="budget-ytd-btn" onclick="setBudgetPeriod('ytd')"
+          style="padding:5px 14px;border-radius:6px;border:1.5px solid #ccc;background:#fff;color:#555;font-size:12px;font-weight:600;cursor:pointer">YTD</button>
+      </div>
+      <div style="font-size:12px;color:#777">
+        <span style="margin-right:12px"><span style="color:#2e7d32;font-weight:700">■</span> Under 50%</span>
+        <span style="margin-right:12px"><span style="color:#f57c00;font-weight:700">■</span> 50–99%</span>
+        <span><span style="color:#c62828;font-weight:700">■</span> At / Over Budget</span>
+      </div>
+    </div>
+    <!-- Budget table -->
+    <div style="padding:14px 18px">
+      <div id="budget-table-wrap" style="overflow-x:auto"></div>
+    </div>
+  </div>
+</div>
 <!-- ═══════════════════ VACANCY TAB ═══════════════════ -->
 <div id="tab-vac" class="content" style="display:none">
   <div class="error-state" id="vac-error" style="display:none">
@@ -1057,6 +1090,8 @@ const GIDS = {
   lfMoveEvents:     '000000000',  // set after first sync
   lfVacHistory:     '000000000',  // set after first sync creates the tab
   lfInspections:    '1336164150',
+  budgetMTD:        '000000000',  // set after first sync creates the tab
+  budgetYTD:        '000000000',  // set after first sync creates the tab
 };
 // ─── JSONP DATA FETCH (works from file:// — no CORS needed) ──────────
 let _cbSeq = 0;
@@ -1144,15 +1179,16 @@ function isEvicting(lease) {
 }
 // ─── TAB ─────────────────────────────────────────────────────────────
 function showTab(t) {
-  ['dq','wo','rx','ret','lf','vac'].forEach(x => {
+  ['dq','wo','rx','ret','lf','vac','budget'].forEach(x => {
     $('tab-' + x).style.display  = x === t ? '' : 'none';
     $('tb-' + x).classList.toggle('active', x === t);
   });
   // Auto-load tab data on first view
-  if (t === 'rx'  && rxRows.length  === 0) loadRX();
-  if (t === 'ret' && retRows.length === 0) loadRET();
-  if (t === 'lf'  && !lfLoaded) loadLF();
-  if (t === 'vac' && !vacLoaded) loadVac();
+  if (t === 'rx'     && rxRows.length  === 0) loadRX();
+  if (t === 'ret'    && retRows.length === 0) loadRET();
+  if (t === 'lf'     && !lfLoaded) loadLF();
+  if (t === 'vac'    && !vacLoaded) loadVac();
+  if (t === 'budget' && !budgetLoaded) loadBudget();
 }
 // ─── DELINQUENCY ─────────────────────────────────────────────────────
 async function loadDQ() {
@@ -4747,6 +4783,185 @@ async function loadLastSync() {
   } catch(e) { /* fall through to default */ }
 }
 
+// ─── BUDGET ──────────────────────────────────────────────────────────────────
+let budgetMTDRows = null;
+let budgetYTDRows = null;
+let budgetPeriod  = 'mtd';
+let budgetLoaded  = false;
+
+function setBudgetPeriod(period) {
+  budgetPeriod = period;
+  ['mtd','ytd'].forEach(p => {
+    const btn = $('budget-' + p + '-btn');
+    btn.style.background  = p === period ? '#1565c0' : '#fff';
+    btn.style.color       = p === period ? '#fff'    : '#555';
+    btn.style.borderColor = p === period ? '#1565c0' : '#ccc';
+  });
+  if (budgetMTDRows !== null || budgetYTDRows !== null) renderBudget();
+}
+
+async function loadBudget() {
+  if (budgetLoaded) return;
+  budgetLoaded = true;
+  $('budget-loading').style.display = '';
+  $('budget-content').style.display = 'none';
+  $('budget-error').style.display   = 'none';
+  try {
+    const parseRows = raw => raw ? raw.map(r => ({
+      pod:      r['POD']            || '',
+      property: r['Property']       || '',
+      parent:   r['Parent Account'] || '',
+      glNum:    r['GL Account #']   || '',
+      glName:   r['GL Account']     || '',
+      actual:   parseFloat(r['Actual'])   || 0,
+      budget:   parseFloat(r['Budget'])   || 0,
+    })) : [];
+
+    const [mtdRaw, ytdRaw] = await Promise.all([
+      GIDS.budgetMTD !== '000000000' ? fetchGViz(GIDS.budgetMTD) : Promise.resolve(null),
+      GIDS.budgetYTD !== '000000000' ? fetchGViz(GIDS.budgetYTD) : Promise.resolve(null),
+    ]);
+    budgetMTDRows = parseRows(mtdRaw);
+    budgetYTDRows = parseRows(ytdRaw);
+    $('budget-loading').style.display = 'none';
+    $('budget-content').style.display = '';
+    renderBudget();
+  } catch(e) {
+    $('budget-loading').style.display = 'none';
+    $('budget-error').style.display   = '';
+    console.error('Budget load error:', e);
+  }
+}
+
+function renderBudget() {
+  const raw  = budgetPeriod === 'ytd' ? budgetYTDRows : budgetMTDRows;
+  const wrap = $('budget-table-wrap');
+
+  if (!raw || raw.length === 0) {
+    const noSync = GIDS.budgetMTD === '000000000';
+    wrap.innerHTML = `<div style="padding:30px;text-align:center;color:#999;font-size:13px">
+      ${noSync ? 'No budget sheets yet — run a full sync first.' : 'No budget data for this period.'}</div>`;
+    $('budget-badge').textContent = '—';
+    return;
+  }
+
+  // Access filter (uses .pod field, same as accessFilter)
+  let rows = ACCESS_PODS ? accessFilter(raw) : raw;
+
+  // Aggregate by pod + parent + glNum + glName
+  const agg = {};
+  rows.forEach(r => {
+    const k = `${r.pod}|||${r.parent}|||${r.glNum}|||${r.glName}`;
+    if (!agg[k]) agg[k] = { pod: r.pod, parent: r.parent, glNum: r.glNum, glName: r.glName, actual: 0, budget: 0 };
+    agg[k].actual += r.actual;
+    agg[k].budget += r.budget;
+  });
+  const aggRows = Object.values(agg).map(r => {
+    const pct = r.budget ? r.actual / r.budget * 100 : null;
+    return { ...r,
+      variance: r.actual - r.budget,
+      pctUsed: pct,
+      status: !r.budget ? 'Under 50%' : r.actual >= r.budget ? 'Over Budget' : r.actual >= r.budget * 0.5 ? '50–100%' : 'Under 50%',
+    };
+  });
+
+  const fmtUSD = v => v == null ? '—' : '$' + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0});
+  const fmtVar = v => (v > 0 ? '+' : '') + '$' + v.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0});
+  const statusColor = s => s === 'Over Budget' ? '#c62828' : s === '50–100%' ? '#f57c00' : '#2e7d32';
+
+  // Deduplicate and sort pods
+  const pods = [...new Set(aggRows.map(r => r.pod))].sort();
+  const PARENTS = ['Controllable Operating Expense', 'Capital Expenses'];
+
+  // Badge = # PODs with at least one over-budget line
+  const overPods = pods.filter(pod => aggRows.some(r => r.pod === pod && r.status === 'Over Budget'));
+  $('budget-badge').textContent = overPods.length > 0 ? `${overPods.length} ⚠` : '✓';
+
+  let html = '';
+  pods.forEach(pod => {
+    const podRows = aggRows.filter(r => r.pod === pod);
+    const podActual = podRows.reduce((s, r) => s + r.actual, 0);
+    const podBudget = podRows.reduce((s, r) => s + r.budget, 0);
+    const podPct    = podBudget ? podActual / podBudget * 100 : null;
+    const podStatus = !podBudget ? 'Under 50%' : podActual >= podBudget ? 'Over Budget' : podActual >= podBudget * 0.5 ? '50–100%' : 'Under 50%';
+
+    html += `<div style="margin-bottom:28px">
+      <div style="background:#1e293b;color:#fff;padding:10px 14px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:700;font-size:13px">${pod}</span>
+        <span style="font-size:12px;color:#94a3b8">${fmtUSD(podActual)} actual &nbsp;/&nbsp; ${fmtUSD(podBudget)} budget
+          <span style="color:${statusColor(podStatus)};font-weight:700;margin-left:10px">${podPct != null ? podPct.toFixed(1) + '%' : '—'}</span>
+        </span>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead>
+          <tr style="background:#f1f5f9;color:#475569">
+            <th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0">GL #</th>
+            <th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0">Account</th>
+            <th style="text-align:right;padding:7px 10px;border-bottom:1px solid #e2e8f0">Actual</th>
+            <th style="text-align:right;padding:7px 10px;border-bottom:1px solid #e2e8f0">Budget</th>
+            <th style="text-align:right;padding:7px 10px;border-bottom:1px solid #e2e8f0">Variance</th>
+            <th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0;min-width:130px">% Used</th>
+          </tr>
+        </thead>
+        <tbody>`;
+
+    PARENTS.forEach(parent => {
+      const pRows = podRows.filter(r => r.parent === parent).sort((a, b) => parseInt(a.glNum) - parseInt(b.glNum));
+      if (pRows.length === 0) return;
+      const pActual = pRows.reduce((s, r) => s + r.actual, 0);
+      const pBudget = pRows.reduce((s, r) => s + r.budget, 0);
+      const pVar    = pActual - pBudget;
+      const pPct    = pBudget ? pActual / pBudget * 100 : null;
+      const pStatus = !pBudget ? 'Under 50%' : pActual >= pBudget ? 'Over Budget' : pActual >= pBudget * 0.5 ? '50–100%' : 'Under 50%';
+
+      html += `<tr style="background:#e8edf4">
+            <td colspan="6" style="padding:5px 10px;font-weight:700;font-size:11px;color:#334155;letter-spacing:.04em">${parent.toUpperCase()}</td>
+          </tr>`;
+
+      pRows.forEach(r => {
+        const barW  = r.pctUsed != null ? Math.min(r.pctUsed, 100).toFixed(1) : '0';
+        const color = statusColor(r.status);
+        const rowBg = r.status === 'Over Budget' ? 'background:#fff5f5;' : '';
+        html += `<tr style="border-bottom:1px solid #f1f5f9;${rowBg}">
+            <td style="padding:6px 10px;color:#64748b">${r.glNum}</td>
+            <td style="padding:6px 10px">${r.glName || '—'}</td>
+            <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmtUSD(r.actual)}</td>
+            <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmtUSD(r.budget)}</td>
+            <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;color:${r.variance > 0 ? '#c62828' : '#2e7d32'}">${fmtVar(r.variance)}</td>
+            <td style="padding:6px 10px">
+              <div style="display:flex;align-items:center;gap:6px">
+                <div style="flex:1;background:#e2e8f0;border-radius:4px;height:7px;overflow:hidden">
+                  <div style="width:${barW}%;background:${color};height:100%;border-radius:4px;transition:width .4s"></div>
+                </div>
+                <span style="font-size:11px;color:${color};font-weight:600;min-width:38px;text-align:right">${r.pctUsed != null ? r.pctUsed.toFixed(1) + '%' : '—'}</span>
+              </div>
+            </td>
+          </tr>`;
+      });
+
+      // Parent subtotal
+      html += `<tr style="background:#f8fafc;border-top:1.5px solid #cbd5e1;font-weight:600">
+            <td colspan="2" style="padding:6px 10px;font-size:11px;color:#475569">SUBTOTAL — ${parent.replace(' Expense', '').replace(' Expenses', '')}</td>
+            <td style="padding:6px 10px;text-align:right">${fmtUSD(pActual)}</td>
+            <td style="padding:6px 10px;text-align:right">${fmtUSD(pBudget)}</td>
+            <td style="padding:6px 10px;text-align:right;color:${pVar > 0 ? '#c62828' : '#2e7d32'}">${fmtVar(pVar)}</td>
+            <td style="padding:6px 10px">
+              <div style="display:flex;align-items:center;gap:6px">
+                <div style="flex:1;background:#e2e8f0;border-radius:4px;height:7px;overflow:hidden">
+                  <div style="width:${pPct != null ? Math.min(pPct, 100).toFixed(1) : 0}%;background:${statusColor(pStatus)};height:100%;border-radius:4px"></div>
+                </div>
+                <span style="font-size:11px;color:${statusColor(pStatus)};font-weight:700;min-width:38px;text-align:right">${pPct != null ? pPct.toFixed(1) + '%' : '—'}</span>
+              </div>
+            </td>
+          </tr>`;
+    });
+
+    html += `</tbody></table></div>`;
+  });
+
+  wrap.innerHTML = html;
+}
+
 // ─── INIT ─────────────────────────────────────────────────────
 (async () => {
   applyAccessControl();
@@ -4755,24 +4970,25 @@ async function loadLastSync() {
   const refreshBtn = document.getElementById('refreshBtn');
   if (refreshBtn) {
     const SYNC_STEPS = [
-      { label: 'Step 1/18  · Occupancy & leasing',       dur: 8  },
-      { label: 'Step 2/18  · Parallel API fetches',       dur: 20 },
-      { label: 'Step 3/18  · Delinquency',                dur: 3  },
-      { label: 'Step 4/18  · Maintenance & work orders',  dur: 5  },
-      { label: 'Step 5/18  · Receipts compliance',        dur: 2  },
-      { label: 'Step 6/18  · Delinquency audit',          dur: 2  },
-      { label: 'Step 7/18  · POD summary',                dur: 1  },
-      { label: 'Step 8/18  · Tenant retention',           dur: 2  },
-      { label: 'Step 9/18  · Retention monthly',          dur: 3  },
-      { label: 'Step 10/18 · Retention history',          dur: 3  },
-      { label: 'Step 11/18 · Guest cards',                dur: 8  },
-      { label: 'Step 12/18 · Showings',                   dur: 5  },
-      { label: 'Step 13/18 · Applications',               dur: 6  },
-      { label: 'Step 14/18 · Security deposits',          dur: 5  },
-      { label: 'Step 15/18 · Scheduled move-ins',         dur: 2  },
-      { label: 'Step 16/18 · Inspections',                dur: 8  },
-      { label: 'Step 17/18 · Unit vacancy',               dur: 8  },
-      { label: 'Step 18/18 · Turn costs (bills)',         dur: 15 },
+      { label: 'Step 1/19  · Occupancy & leasing',       dur: 8  },
+      { label: 'Step 2/19  · Parallel API fetches',       dur: 20 },
+      { label: 'Step 3/19  · Delinquency',                dur: 3  },
+      { label: 'Step 4/19  · Maintenance & work orders',  dur: 5  },
+      { label: 'Step 5/19  · Receipts compliance',        dur: 2  },
+      { label: 'Step 6/19  · Delinquency audit',          dur: 2  },
+      { label: 'Step 7/19  · POD summary',                dur: 1  },
+      { label: 'Step 8/19  · Tenant retention',           dur: 2  },
+      { label: 'Step 9/19  · Retention monthly',          dur: 3  },
+      { label: 'Step 10/19 · Retention history',          dur: 3  },
+      { label: 'Step 11/19 · Guest cards',                dur: 8  },
+      { label: 'Step 12/19 · Showings',                   dur: 5  },
+      { label: 'Step 13/19 · Applications',               dur: 6  },
+      { label: 'Step 14/19 · Security deposits',          dur: 5  },
+      { label: 'Step 15/19 · Scheduled move-ins',         dur: 2  },
+      { label: 'Step 16/19 · Inspections',                dur: 8  },
+      { label: 'Step 17/19 · Unit vacancy',               dur: 8  },
+      { label: 'Step 18/19 · Turn costs (bills)',         dur: 15 },
+      { label: 'Step 19/19 · Budget comparison',          dur: 10 },
     ];
     const TOTAL_DUR = SYNC_STEPS.reduce((s, x) => s + x.dur, 0);
     let syncTimers = [];
@@ -4872,6 +5088,8 @@ async function loadLastSync() {
   if (GIDS.retentionMonthly !== '000000000') loadRETMonthly();
   if (GIDS.retentionHistory !== '000000000') loadRETHistory();
   loadRetEvents();
+  // Budget pre-load (both sheets ready after first sync)
+  if (GIDS.budgetMTD !== '000000000' || GIDS.budgetYTD !== '000000000') loadBudget();
 })();
 </script>
 </body>
