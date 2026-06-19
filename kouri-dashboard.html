@@ -3483,12 +3483,12 @@ function toggleCostDrill(drillId, cat) {
                      floor:'Flooring', clean:'Cleaning', remodel:'Remodel', appliance:'Appliances', other:'Other' };
   const fmtD = d => d ? d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
   const fmtA = v => '$' + Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-  const afBillUrl = (_ref, amt) => amt
-    ? `https://kmcprops.appfolio.com/search/advanced_search?full_text_search=${Number(amt).toFixed(2)}&section_keys=transactions&result_types=payable_invoice%2Cpayable_payment`
+  const afBillUrl = (txn_id) => txn_id
+    ? `https://kmcprops.appfolio.com/accounting/payable_invoices/${txn_id}`
     : null;
 
   const rows = filtered.map(b => {
-    const bUrl = afBillUrl(b.reference, b.amount);
+    const bUrl = afBillUrl(b.txn_id);
     const amtCell = bUrl
       ? `<a href="${bUrl}" target="_blank" style="color:#1565c0;font-weight:700;font-size:12px;text-decoration:underline dotted">${fmtA(b.amount)}</a>`
       : `<span style="font-weight:700;font-size:12px;color:#1565c0">${fmtA(b.amount)}</span>`;
@@ -3616,15 +3616,15 @@ function toggleVdetDrill(vdrillId, cat) {
   }
 
   // ── Table 2: Bills ────────────────────────────────────────────────
-  const afBillUrl2 = (_ref, amt) => amt
-    ? 'https://kmcprops.appfolio.com/search/advanced_search?full_text_search=' + Number(amt).toFixed(2) + '&section_keys=transactions&result_types=payable_invoice%2Cpayable_payment'
+  const afBillUrl2 = (txn_id) => txn_id
+    ? 'https://kmcprops.appfolio.com/accounting/payable_invoices/' + txn_id
     : null;
   let billTable = '';
   if (bills.length > 0) {
     const sortedBills = [...bills].sort((a,b) => (b._date||0) - (a._date||0));
     const billTotal = bills.reduce((s,b) => s + b.amount, 0);
     const billRows = sortedBills.map(b => {
-      const bUrl = afBillUrl2(b.reference, b.amount);
+      const bUrl = afBillUrl2(b.txn_id);
       const amtCell = bUrl
         ? '<a href="' + bUrl + '" target="_blank" style="color:#1565c0;font-weight:700;font-size:12px;text-decoration:underline dotted">' + fmtA(b.amount) + '</a>'
         : '<span style="font-weight:700;font-size:12px;color:#1565c0">' + fmtA(b.amount) + '</span>';
@@ -4117,6 +4117,7 @@ async function loadLFTurnCosts() {
     amount         : parseFloat(r['Amount']) || 0,
     description    : r['Description']     || '',
     reference      : r['Reference']       || '',
+    txn_id         : r['Transaction ID']  || '',
     payment_status : r['Payment Status']  || '',
   })).filter(r => r.unit);
   if (ACCESS_PODS) lfTurnCostRows = accessFilter(lfTurnCostRows);
@@ -4808,13 +4809,14 @@ async function loadBudget() {
   $('budget-error').style.display   = 'none';
   try {
     const parseRows = raw => raw ? raw.map(r => ({
-      pod:      r['POD']            || '',
-      property: r['Property']       || '',
-      parent:   r['Parent Account'] || '',
-      glNum:    r['GL Account #']   || '',
-      glName:   r['GL Account']     || '',
-      actual:   parseFloat(r['Actual'])   || 0,
-      budget:   parseFloat(r['Budget'])   || 0,
+      pod:    r['POD']            || 'All Properties',
+      prop:   r['Property']       || '',
+      propId: r['Property ID']    || '',
+      parent: r['Parent Account'] || '',
+      glNum:  r['GL Account #']   || '',
+      glName: r['GL Account']     || '',
+      actual: parseFloat(r['Actual'])  || 0,
+      budget: parseFloat(r['Budget'])  || 0,
     })) : [];
 
     const [mtdRaw, ytdRaw] = await Promise.all([
@@ -4845,51 +4847,138 @@ function renderBudget() {
     return;
   }
 
-  // Access filter (uses .pod field, same as accessFilter)
-  let rows = ACCESS_PODS ? accessFilter(raw) : raw;
-
-  // Aggregate by pod + parent + glNum + glName
-  const agg = {};
-  rows.forEach(r => {
-    const k = `${r.pod}|||${r.parent}|||${r.glNum}|||${r.glName}`;
-    if (!agg[k]) agg[k] = { pod: r.pod, parent: r.parent, glNum: r.glNum, glName: r.glName, actual: 0, budget: 0 };
-    agg[k].actual += r.actual;
-    agg[k].budget += r.budget;
-  });
-  const aggRows = Object.values(agg).map(r => {
-    const pct = r.budget ? r.actual / r.budget * 100 : null;
-    return { ...r,
-      variance: r.actual - r.budget,
-      pctUsed: pct,
-      status: !r.budget ? 'Under 50%' : r.actual >= r.budget ? 'Over Budget' : r.actual >= r.budget * 0.5 ? '50–100%' : 'Under 50%',
-    };
-  });
-
   const fmtUSD = v => v == null ? '—' : '$' + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0});
-  const fmtVar = v => (v > 0 ? '+' : '') + '$' + v.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0});
+  const fmtVar = v => (v >= 0 ? '+' : '') + '$' + v.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0});
   const statusColor = s => s === 'Over Budget' ? '#c62828' : s === '50–100%' ? '#f57c00' : '#2e7d32';
+  const pctStatus = (actual, budget) => !budget ? 'Under 50%' : actual >= budget ? 'Over Budget' : actual >= budget * 0.5 ? '50–100%' : 'Under 50%';
 
-  // Deduplicate and sort pods
-  const pods = [...new Set(aggRows.map(r => r.pod))].sort();
   const PARENTS = ['Controllable Operating Expense', 'Capital Expenses'];
 
-  // Badge = # PODs with at least one over-budget line
-  const overPods = pods.filter(pod => aggRows.some(r => r.pod === pod && r.status === 'Over Budget'));
-  $('budget-badge').textContent = overPods.length > 0 ? `${overPods.length} ⚠` : '✓';
+  // Apply POD access filter
+  const rows = raw.filter(r => accessFilter(r));
+
+  // Badge: # over-budget GL accounts (unique gl# across pods) at company level
+  const glNums = [...new Set(rows.map(r => r.glNum))];
+  const overCount = glNums.filter(gl => {
+    const glRows = rows.filter(r => r.glNum === gl);
+    const a = glRows.reduce((s, r) => s + r.actual, 0);
+    const b = glRows.reduce((s, r) => s + r.budget, 0);
+    return b && a >= b;
+  }).length;
+  $('budget-badge').textContent = overCount > 0 ? `${overCount} ⚠` : '✓';
+
+  // Determine if we have per-property breakdown or aggregate
+  const isPerPOD = rows.some(r => r.pod && r.pod !== 'All Properties');
 
   let html = '';
-  pods.forEach(pod => {
-    const podRows = aggRows.filter(r => r.pod === pod);
-    const podActual = podRows.reduce((s, r) => s + r.actual, 0);
-    const podBudget = podRows.reduce((s, r) => s + r.budget, 0);
-    const podPct    = podBudget ? podActual / podBudget * 100 : null;
-    const podStatus = !podBudget ? 'Under 50%' : podActual >= podBudget ? 'Over Budget' : podActual >= podBudget * 0.5 ? '50–100%' : 'Under 50%';
+
+  if (isPerPOD) {
+    // Group by POD → within each POD, group by parent → then by GL
+    const pods = [...new Set(rows.map(r => r.pod))].sort();
+
+    pods.forEach(pod => {
+      const podRows = rows.filter(r => r.pod === pod);
+      const podActual = podRows.reduce((s, r) => s + r.actual, 0);
+      const podBudget = podRows.reduce((s, r) => s + r.budget, 0);
+      const podPct    = podBudget ? podActual / podBudget * 100 : null;
+      const podStatus = pctStatus(podActual, podBudget);
+
+      html += `<div style="margin-bottom:24px">
+        <div style="background:#1e293b;color:#fff;padding:9px 14px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center">
+          <span style="font-weight:700;font-size:13px">${pod}</span>
+          <span style="font-size:12px;color:#94a3b8">${fmtUSD(podActual)} actual &nbsp;/&nbsp; ${fmtUSD(podBudget)} budget
+            <span style="color:${statusColor(podStatus)};font-weight:700;margin-left:10px">${podPct != null ? podPct.toFixed(1) + '%' : '—'}</span>
+          </span>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead>
+            <tr style="background:#f1f5f9;color:#475569">
+              <th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0">GL #</th>
+              <th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0">Account</th>
+              <th style="text-align:right;padding:7px 10px;border-bottom:1px solid #e2e8f0">Actual</th>
+              <th style="text-align:right;padding:7px 10px;border-bottom:1px solid #e2e8f0">Budget</th>
+              <th style="text-align:right;padding:7px 10px;border-bottom:1px solid #e2e8f0">Variance</th>
+              <th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0;min-width:130px">% Used</th>
+            </tr>
+          </thead>
+          <tbody>`;
+
+      PARENTS.forEach(parent => {
+        // Aggregate per GL# within this POD (multiple properties → sum)
+        const glMap = {};
+        podRows.filter(r => r.parent === parent).forEach(r => {
+          if (!glMap[r.glNum]) glMap[r.glNum] = {glNum: r.glNum, glName: r.glName, actual: 0, budget: 0};
+          glMap[r.glNum].actual += r.actual;
+          glMap[r.glNum].budget += r.budget;
+        });
+        const pRows = Object.values(glMap).sort((a, b) => parseInt(a.glNum) - parseInt(b.glNum));
+        if (pRows.length === 0) return;
+
+        const pActual = pRows.reduce((s, r) => s + r.actual, 0);
+        const pBudget = pRows.reduce((s, r) => s + r.budget, 0);
+        const pVar    = pActual - pBudget;
+        const pPct    = pBudget ? pActual / pBudget * 100 : null;
+        const pStatus = pctStatus(pActual, pBudget);
+
+        html += `<tr style="background:#e8edf4">
+            <td colspan="6" style="padding:5px 10px;font-weight:700;font-size:11px;color:#334155;letter-spacing:.04em">${parent.toUpperCase()}</td>
+          </tr>`;
+
+        pRows.forEach(r => {
+          const pct    = r.budget ? r.actual / r.budget * 100 : null;
+          const status = pctStatus(r.actual, r.budget);
+          const barW   = pct != null ? Math.min(pct, 100).toFixed(1) : '0';
+          const color  = statusColor(status);
+          const rowBg  = status === 'Over Budget' ? 'background:#fff5f5;' : '';
+          const variance = r.actual - r.budget;
+          html += `<tr style="border-bottom:1px solid #f1f5f9;${rowBg}">
+            <td style="padding:6px 10px;color:#64748b">${r.glNum}</td>
+            <td style="padding:6px 10px">${r.glName || '—'}</td>
+            <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmtUSD(r.actual)}</td>
+            <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmtUSD(r.budget)}</td>
+            <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;color:${variance > 0 ? '#c62828' : '#2e7d32'}">${fmtVar(variance)}</td>
+            <td style="padding:6px 10px">
+              <div style="display:flex;align-items:center;gap:6px">
+                <div style="flex:1;background:#e2e8f0;border-radius:4px;height:7px;overflow:hidden">
+                  <div style="width:${barW}%;background:${color};height:100%;border-radius:4px;transition:width .4s"></div>
+                </div>
+                <span style="font-size:11px;color:${color};font-weight:600;min-width:38px;text-align:right">${pct != null ? pct.toFixed(1) + '%' : '—'}</span>
+              </div>
+            </td>
+          </tr>`;
+        });
+
+        html += `<tr style="background:#f8fafc;border-top:1.5px solid #cbd5e1;font-weight:600">
+            <td colspan="2" style="padding:6px 10px;font-size:11px;color:#475569">SUBTOTAL — ${parent.replace(' Expense', '').replace(' Expenses', '')}</td>
+            <td style="padding:6px 10px;text-align:right">${fmtUSD(pActual)}</td>
+            <td style="padding:6px 10px;text-align:right">${fmtUSD(pBudget)}</td>
+            <td style="padding:6px 10px;text-align:right;color:${pVar > 0 ? '#c62828' : '#2e7d32'}">${fmtVar(pVar)}</td>
+            <td style="padding:6px 10px">
+              <div style="display:flex;align-items:center;gap:6px">
+                <div style="flex:1;background:#e2e8f0;border-radius:4px;height:7px;overflow:hidden">
+                  <div style="width:${pPct != null ? Math.min(pPct, 100).toFixed(1) : 0}%;background:${statusColor(pStatus)};height:100%;border-radius:4px"></div>
+                </div>
+                <span style="font-size:11px;color:${statusColor(pStatus)};font-weight:700;min-width:38px;text-align:right">${pPct != null ? pPct.toFixed(1) + '%' : '—'}</span>
+              </div>
+            </td>
+          </tr>`;
+      });
+
+      html += `</tbody></table></div>`;
+    });
+
+  } else {
+    // Fallback: aggregate view (no POD data)
+    const totActual = rows.reduce((s, r) => s + r.actual, 0);
+    const totBudget = rows.reduce((s, r) => s + r.budget, 0);
+    const totPct    = totBudget ? totActual / totBudget * 100 : null;
+    const totStatus = pctStatus(totActual, totBudget);
 
     html += `<div style="margin-bottom:28px">
       <div style="background:#1e293b;color:#fff;padding:10px 14px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center">
-        <span style="font-weight:700;font-size:13px">${pod}</span>
-        <span style="font-size:12px;color:#94a3b8">${fmtUSD(podActual)} actual &nbsp;/&nbsp; ${fmtUSD(podBudget)} budget
-          <span style="color:${statusColor(podStatus)};font-weight:700;margin-left:10px">${podPct != null ? podPct.toFixed(1) + '%' : '—'}</span>
+        <span style="font-weight:700;font-size:13px">All Properties — Company Total</span>
+        <span style="font-size:12px;color:#94a3b8">${fmtUSD(totActual)} actual &nbsp;/&nbsp; ${fmtUSD(totBudget)} budget
+          <span style="color:${statusColor(totStatus)};font-weight:700;margin-left:10px">${totPct != null ? totPct.toFixed(1) + '%' : '—'}</span>
         </span>
       </div>
       <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -4906,40 +4995,42 @@ function renderBudget() {
         <tbody>`;
 
     PARENTS.forEach(parent => {
-      const pRows = podRows.filter(r => r.parent === parent).sort((a, b) => parseInt(a.glNum) - parseInt(b.glNum));
+      const pRows = rows.filter(r => r.parent === parent).sort((a, b) => parseInt(a.glNum) - parseInt(b.glNum));
       if (pRows.length === 0) return;
       const pActual = pRows.reduce((s, r) => s + r.actual, 0);
       const pBudget = pRows.reduce((s, r) => s + r.budget, 0);
       const pVar    = pActual - pBudget;
       const pPct    = pBudget ? pActual / pBudget * 100 : null;
-      const pStatus = !pBudget ? 'Under 50%' : pActual >= pBudget ? 'Over Budget' : pActual >= pBudget * 0.5 ? '50–100%' : 'Under 50%';
+      const pStatus = pctStatus(pActual, pBudget);
 
       html += `<tr style="background:#e8edf4">
             <td colspan="6" style="padding:5px 10px;font-weight:700;font-size:11px;color:#334155;letter-spacing:.04em">${parent.toUpperCase()}</td>
           </tr>`;
 
       pRows.forEach(r => {
-        const barW  = r.pctUsed != null ? Math.min(r.pctUsed, 100).toFixed(1) : '0';
-        const color = statusColor(r.status);
-        const rowBg = r.status === 'Over Budget' ? 'background:#fff5f5;' : '';
+        const pct    = r.budget ? r.actual / r.budget * 100 : null;
+        const status = pctStatus(r.actual, r.budget);
+        const barW   = pct != null ? Math.min(pct, 100).toFixed(1) : '0';
+        const color  = statusColor(status);
+        const rowBg  = status === 'Over Budget' ? 'background:#fff5f5;' : '';
+        const variance = r.actual - r.budget;
         html += `<tr style="border-bottom:1px solid #f1f5f9;${rowBg}">
             <td style="padding:6px 10px;color:#64748b">${r.glNum}</td>
             <td style="padding:6px 10px">${r.glName || '—'}</td>
             <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmtUSD(r.actual)}</td>
             <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmtUSD(r.budget)}</td>
-            <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;color:${r.variance > 0 ? '#c62828' : '#2e7d32'}">${fmtVar(r.variance)}</td>
+            <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;color:${variance > 0 ? '#c62828' : '#2e7d32'}">${fmtVar(variance)}</td>
             <td style="padding:6px 10px">
               <div style="display:flex;align-items:center;gap:6px">
                 <div style="flex:1;background:#e2e8f0;border-radius:4px;height:7px;overflow:hidden">
                   <div style="width:${barW}%;background:${color};height:100%;border-radius:4px;transition:width .4s"></div>
                 </div>
-                <span style="font-size:11px;color:${color};font-weight:600;min-width:38px;text-align:right">${r.pctUsed != null ? r.pctUsed.toFixed(1) + '%' : '—'}</span>
+                <span style="font-size:11px;color:${color};font-weight:600;min-width:38px;text-align:right">${pct != null ? pct.toFixed(1) + '%' : '—'}</span>
               </div>
             </td>
           </tr>`;
       });
 
-      // Parent subtotal
       html += `<tr style="background:#f8fafc;border-top:1.5px solid #cbd5e1;font-weight:600">
             <td colspan="2" style="padding:6px 10px;font-size:11px;color:#475569">SUBTOTAL — ${parent.replace(' Expense', '').replace(' Expenses', '')}</td>
             <td style="padding:6px 10px;text-align:right">${fmtUSD(pActual)}</td>
@@ -4957,7 +5048,7 @@ function renderBudget() {
     });
 
     html += `</tbody></table></div>`;
-  });
+  }
 
   wrap.innerHTML = html;
 }
