@@ -895,9 +895,9 @@ tbody td { padding: 6px 8px; color: #333; font-size: 12px; }
     <div style="display:flex;align-items:center;gap:10px;padding:14px 18px 0;flex-wrap:wrap">
       <div style="display:flex;gap:6px">
         <button id="budget-mtd-btn" onclick="setBudgetPeriod('mtd')"
-          style="padding:5px 14px;border-radius:6px;border:1.5px solid #1565c0;background:#1565c0;color:#fff;font-size:12px;font-weight:600;cursor:pointer">MTD</button>
+          style="padding:5px 14px;border-radius:6px;border:1.5px solid #ccc;background:#fff;color:#555;font-size:12px;font-weight:600;cursor:pointer">MTD</button>
         <button id="budget-ytd-btn" onclick="setBudgetPeriod('ytd')"
-          style="padding:5px 14px;border-radius:6px;border:1.5px solid #ccc;background:#fff;color:#555;font-size:12px;font-weight:600;cursor:pointer">YTD</button>
+          style="padding:5px 14px;border-radius:6px;border:1.5px solid #1565c0;background:#1565c0;color:#fff;font-size:12px;font-weight:600;cursor:pointer">YTD</button>
       </div>
       <div style="font-size:12px;color:#777">
         <span style="margin-right:12px"><span style="color:#2e7d32;font-weight:700">■</span> Under 50%</span>
@@ -4791,7 +4791,7 @@ async function loadLastSync() {
 // ─── BUDGET ──────────────────────────────────────────────────────────────────
 let budgetMTDRows = null;
 let budgetYTDRows = null;
-let budgetPeriod  = 'mtd';
+let budgetPeriod  = 'ytd';
 let budgetLoaded  = false;
 
 function setBudgetPeriod(period) {
@@ -4831,7 +4831,15 @@ async function loadBudget() {
     budgetYTDRows = parseRows(ytdRaw);
     $('budget-loading').style.display = 'none';
     $('budget-content').style.display = '';
-    renderBudget();
+    // If MTD isn't synced yet, dim its toggle and default to YTD
+    const mtdAvail = budgetMTDRows && budgetMTDRows.length > 0;
+    const mtdBtn = $('budget-mtd-btn');
+    if (mtdBtn && !mtdAvail) {
+      mtdBtn.style.opacity = '0.45';
+      mtdBtn.style.cursor  = 'help';
+      mtdBtn.title = 'Month-to-date budget not synced yet — run a full sync, then set the Budget MTD GID.';
+    }
+    setBudgetPeriod(mtdAvail ? 'mtd' : 'ytd');
   } catch(e) {
     $('budget-loading').style.display = 'none';
     $('budget-error').style.display   = '';
@@ -4839,220 +4847,178 @@ async function loadBudget() {
   }
 }
 
+function budgetToggle(bodyId, caretId) {
+  const b = document.getElementById(bodyId);
+  if (!b) return;
+  const open = b.style.display !== 'none';
+  b.style.display = open ? 'none' : '';
+  const c = document.getElementById(caretId);
+  if (c) c.style.transform = open ? 'rotate(0deg)' : 'rotate(90deg)';
+}
+
+function budgetExpandAll(open) {
+  document.querySelectorAll('[data-budget-body]').forEach(b => {
+    b.style.display = open ? '' : 'none';
+    const c = document.getElementById(b.id + '-c');
+    if (c) c.style.transform = open ? 'rotate(90deg)' : 'rotate(0deg)';
+  });
+}
+
 function renderBudget() {
   const raw  = budgetPeriod === 'ytd' ? budgetYTDRows : budgetMTDRows;
   const wrap = $('budget-table-wrap');
 
   if (!raw || raw.length === 0) {
-    const noSync = GIDS.budgetMTD === '000000000';
-    wrap.innerHTML = `<div style="padding:30px;text-align:center;color:#999;font-size:13px">
-      ${noSync ? 'No budget sheets yet — run a full sync first.' : 'No budget data for this period.'}</div>`;
+    let msg;
+    if (budgetPeriod === 'mtd') {
+      msg = GIDS.budgetMTD === '000000000'
+        ? 'Month-to-date budget isn’t synced yet. Run a full sync to create the Budget MTD tab, then set its GID in the dashboard.'
+        : 'No month-to-date budget data for the current period.';
+    } else {
+      msg = GIDS.budgetYTD === '000000000'
+        ? 'No budget sheets yet — run a full sync first.'
+        : 'No budget data for this period.';
+    }
+    wrap.innerHTML = `<div style="padding:30px;text-align:center;color:#999;font-size:13px">${msg}</div>`;
     $('budget-badge').textContent = '—';
     return;
   }
 
   const fmtUSD = v => v == null ? '—' : '$' + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0});
-  const fmtVar = v => (v >= 0 ? '+' : '') + '$' + v.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0});
+  const fmtVar = v => (v >= 0 ? '+' : '−') + '$' + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0});
   const statusColor = s => s === 'Over Budget' ? '#c62828' : s === '50–100%' ? '#f57c00' : '#2e7d32';
   const pctStatus = (actual, budget) => !budget ? 'Under 50%' : actual >= budget ? 'Over Budget' : actual >= budget * 0.5 ? '50–100%' : 'Under 50%';
+  const pctBar = (pct, color) => `<div style="display:flex;align-items:center;gap:6px;min-width:118px">
+        <div style="flex:1;background:#e2e8f0;border-radius:4px;height:7px;overflow:hidden">
+          <div style="width:${pct != null ? Math.min(pct, 100).toFixed(1) : 0}%;background:${color};height:100%;border-radius:4px;transition:width .4s"></div>
+        </div>
+        <span style="font-size:11px;color:${color};font-weight:700;min-width:40px;text-align:right">${pct != null ? pct.toFixed(1) + '%' : '—'}</span>
+      </div>`;
 
   const PARENTS = ['Controllable Operating Expense', 'Capital Expenses'];
 
-  // Apply POD access filter
-  const rows = raw.filter(r => accessFilter(r));
+  // Apply POD access filter; drop junk/blank rows (must have a GL #)
+  const rows = raw.filter(r => r.glNum && accessFilter(r));
 
-  // Badge: # over-budget GL accounts (unique gl# across pods) at company level
-  const glNums = [...new Set(rows.map(r => r.glNum))];
-  const overCount = glNums.filter(gl => {
-    const glRows = rows.filter(r => r.glNum === gl);
-    const a = glRows.reduce((s, r) => s + r.actual, 0);
-    const b = glRows.reduce((s, r) => s + r.budget, 0);
-    return b && a >= b;
-  }).length;
+  // Badge: # of over-budget super-account categories (POD × parent) company-wide
+  let overCount = 0;
+  const seenCat = {};
+  rows.forEach(r => {
+    const k = r.pod + '|' + r.parent;
+    if (seenCat[k]) return;
+    seenCat[k] = true;
+    const catRows = rows.filter(x => x.pod === r.pod && x.parent === r.parent);
+    const a = catRows.reduce((s, x) => s + x.actual, 0);
+    const b = catRows.reduce((s, x) => s + x.budget, 0);
+    if (b && a >= b) overCount++;
+  });
   $('budget-badge').textContent = overCount > 0 ? `${overCount} ⚠` : '✓';
 
-  // Determine if we have per-property breakdown or aggregate
-  const isPerPOD = rows.some(r => r.pod && r.pod !== 'All Properties');
+  // Company summary strip
+  const coActual = rows.reduce((s, r) => s + r.actual, 0);
+  const coBudget = rows.reduce((s, r) => s + r.budget, 0);
+  const coPct    = coBudget ? coActual / coBudget * 100 : null;
+  const pods     = [...new Set(rows.map(r => r.pod))].filter(Boolean).sort();
 
-  let html = '';
-
-  if (isPerPOD) {
-    // Group by POD → within each POD, group by parent → then by GL
-    const pods = [...new Set(rows.map(r => r.pod))].sort();
-
-    pods.forEach(pod => {
-      const podRows = rows.filter(r => r.pod === pod);
-      const podActual = podRows.reduce((s, r) => s + r.actual, 0);
-      const podBudget = podRows.reduce((s, r) => s + r.budget, 0);
-      const podPct    = podBudget ? podActual / podBudget * 100 : null;
-      const podStatus = pctStatus(podActual, podBudget);
-
-      html += `<div style="margin-bottom:24px">
-        <div style="background:#1e293b;color:#fff;padding:9px 14px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center">
-          <span style="font-weight:700;font-size:13px">${pod}</span>
-          <span style="font-size:12px;color:#94a3b8">${fmtUSD(podActual)} actual &nbsp;/&nbsp; ${fmtUSD(podBudget)} budget
-            <span style="color:${statusColor(podStatus)};font-weight:700;margin-left:10px">${podPct != null ? podPct.toFixed(1) + '%' : '—'}</span>
-          </span>
-        </div>
-        <table style="width:100%;border-collapse:collapse;font-size:12px">
-          <thead>
-            <tr style="background:#f1f5f9;color:#475569">
-              <th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0">GL #</th>
-              <th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0">Account</th>
-              <th style="text-align:right;padding:7px 10px;border-bottom:1px solid #e2e8f0">Actual</th>
-              <th style="text-align:right;padding:7px 10px;border-bottom:1px solid #e2e8f0">Budget</th>
-              <th style="text-align:right;padding:7px 10px;border-bottom:1px solid #e2e8f0">Variance</th>
-              <th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0;min-width:130px">% Used</th>
-            </tr>
-          </thead>
-          <tbody>`;
-
-      PARENTS.forEach(parent => {
-        // Aggregate per GL# within this POD (multiple properties → sum)
-        const glMap = {};
-        podRows.filter(r => r.parent === parent).forEach(r => {
-          if (!glMap[r.glNum]) glMap[r.glNum] = {glNum: r.glNum, glName: r.glName, actual: 0, budget: 0};
-          glMap[r.glNum].actual += r.actual;
-          glMap[r.glNum].budget += r.budget;
-        });
-        const pRows = Object.values(glMap).sort((a, b) => parseInt(a.glNum) - parseInt(b.glNum));
-        if (pRows.length === 0) return;
-
-        const pActual = pRows.reduce((s, r) => s + r.actual, 0);
-        const pBudget = pRows.reduce((s, r) => s + r.budget, 0);
-        const pVar    = pActual - pBudget;
-        const pPct    = pBudget ? pActual / pBudget * 100 : null;
-        const pStatus = pctStatus(pActual, pBudget);
-
-        html += `<tr style="background:#e8edf4">
-            <td colspan="6" style="padding:5px 10px;font-weight:700;font-size:11px;color:#334155;letter-spacing:.04em">${parent.toUpperCase()}</td>
-          </tr>`;
-
-        pRows.forEach(r => {
-          const pct    = r.budget ? r.actual / r.budget * 100 : null;
-          const status = pctStatus(r.actual, r.budget);
-          const barW   = pct != null ? Math.min(pct, 100).toFixed(1) : '0';
-          const color  = statusColor(status);
-          const rowBg  = status === 'Over Budget' ? 'background:#fff5f5;' : '';
-          const variance = r.actual - r.budget;
-          html += `<tr style="border-bottom:1px solid #f1f5f9;${rowBg}">
-            <td style="padding:6px 10px;color:#64748b">${r.glNum}</td>
-            <td style="padding:6px 10px">${r.glName || '—'}</td>
-            <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmtUSD(r.actual)}</td>
-            <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmtUSD(r.budget)}</td>
-            <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;color:${variance > 0 ? '#c62828' : '#2e7d32'}">${fmtVar(variance)}</td>
-            <td style="padding:6px 10px">
-              <div style="display:flex;align-items:center;gap:6px">
-                <div style="flex:1;background:#e2e8f0;border-radius:4px;height:7px;overflow:hidden">
-                  <div style="width:${barW}%;background:${color};height:100%;border-radius:4px;transition:width .4s"></div>
-                </div>
-                <span style="font-size:11px;color:${color};font-weight:600;min-width:38px;text-align:right">${pct != null ? pct.toFixed(1) + '%' : '—'}</span>
-              </div>
-            </td>
-          </tr>`;
-        });
-
-        html += `<tr style="background:#f8fafc;border-top:1.5px solid #cbd5e1;font-weight:600">
-            <td colspan="2" style="padding:6px 10px;font-size:11px;color:#475569">SUBTOTAL — ${parent.replace(' Expense', '').replace(' Expenses', '')}</td>
-            <td style="padding:6px 10px;text-align:right">${fmtUSD(pActual)}</td>
-            <td style="padding:6px 10px;text-align:right">${fmtUSD(pBudget)}</td>
-            <td style="padding:6px 10px;text-align:right;color:${pVar > 0 ? '#c62828' : '#2e7d32'}">${fmtVar(pVar)}</td>
-            <td style="padding:6px 10px">
-              <div style="display:flex;align-items:center;gap:6px">
-                <div style="flex:1;background:#e2e8f0;border-radius:4px;height:7px;overflow:hidden">
-                  <div style="width:${pPct != null ? Math.min(pPct, 100).toFixed(1) : 0}%;background:${statusColor(pStatus)};height:100%;border-radius:4px"></div>
-                </div>
-                <span style="font-size:11px;color:${statusColor(pStatus)};font-weight:700;min-width:38px;text-align:right">${pPct != null ? pPct.toFixed(1) + '%' : '—'}</span>
-              </div>
-            </td>
-          </tr>`;
-      });
-
-      html += `</tbody></table></div>`;
-    });
-
-  } else {
-    // Fallback: aggregate view (no POD data)
-    const totActual = rows.reduce((s, r) => s + r.actual, 0);
-    const totBudget = rows.reduce((s, r) => s + r.budget, 0);
-    const totPct    = totBudget ? totActual / totBudget * 100 : null;
-    const totStatus = pctStatus(totActual, totBudget);
-
-    html += `<div style="margin-bottom:28px">
-      <div style="background:#1e293b;color:#fff;padding:10px 14px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center">
-        <span style="font-weight:700;font-size:13px">All Properties — Company Total</span>
-        <span style="font-size:12px;color:#94a3b8">${fmtUSD(totActual)} actual &nbsp;/&nbsp; ${fmtUSD(totBudget)} budget
-          <span style="color:${statusColor(totStatus)};font-weight:700;margin-left:10px">${totPct != null ? totPct.toFixed(1) + '%' : '—'}</span>
-        </span>
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:8px 4px 14px">
+      <div style="font-size:12px;color:#64748b">
+        <strong style="color:#334155">${pods.length}</strong> PODs &nbsp;·&nbsp;
+        <strong style="color:#334155">${fmtUSD(coActual)}</strong> actual / <strong style="color:#334155">${fmtUSD(coBudget)}</strong> budget &nbsp;·&nbsp;
+        <span style="color:${statusColor(pctStatus(coActual, coBudget))};font-weight:700">${coPct != null ? coPct.toFixed(1) + '%' : '—'} used</span>
       </div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead>
-          <tr style="background:#f1f5f9;color:#475569">
-            <th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0">GL #</th>
-            <th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0">Account</th>
-            <th style="text-align:right;padding:7px 10px;border-bottom:1px solid #e2e8f0">Actual</th>
-            <th style="text-align:right;padding:7px 10px;border-bottom:1px solid #e2e8f0">Budget</th>
-            <th style="text-align:right;padding:7px 10px;border-bottom:1px solid #e2e8f0">Variance</th>
-            <th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0;min-width:130px">% Used</th>
-          </tr>
-        </thead>
-        <tbody>`;
+      <div style="display:flex;gap:6px">
+        <button onclick="budgetExpandAll(true)" style="font-size:11px;padding:4px 10px;border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:6px;cursor:pointer">Expand all</button>
+        <button onclick="budgetExpandAll(false)" style="font-size:11px;padding:4px 10px;border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:6px;cursor:pointer">Collapse all</button>
+      </div>
+    </div>`;
 
-    PARENTS.forEach(parent => {
-      const pRows = rows.filter(r => r.parent === parent).sort((a, b) => parseInt(a.glNum) - parseInt(b.glNum));
-      if (pRows.length === 0) return;
-      const pActual = pRows.reduce((s, r) => s + r.actual, 0);
-      const pBudget = pRows.reduce((s, r) => s + r.budget, 0);
+  let pi = 0;
+  pods.forEach(pod => {
+    const podRows   = rows.filter(r => r.pod === pod);
+    const podActual = podRows.reduce((s, r) => s + r.actual, 0);
+    const podBudget = podRows.reduce((s, r) => s + r.budget, 0);
+    const podPct    = podBudget ? podActual / podBudget * 100 : null;
+    const podStatus = pctStatus(podActual, podBudget);
+    const podId     = 'bpod' + (pi++);
+
+    // ── Level 1: POD header (collapsed by default) ──
+    html += `<div style="margin-bottom:8px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">
+      <div onclick="budgetToggle('${podId}-body','${podId}-body-c')" style="cursor:pointer;background:#1e293b;color:#fff;padding:10px 14px;display:flex;align-items:center;gap:12px">
+        <span id="${podId}-body-c" style="display:inline-block;transition:transform .15s;font-size:11px;color:#94a3b8">▸</span>
+        <span style="font-weight:700;font-size:13px;flex:1">${pod}</span>
+        <span style="font-size:12px;color:#cbd5e1;white-space:nowrap">${fmtUSD(podActual)} / ${fmtUSD(podBudget)}</span>
+        <span style="color:${podStatus === 'Over Budget' ? '#fca5a5' : podStatus === '50–100%' ? '#fcd34d' : '#86efac'};font-weight:700;font-size:12px;min-width:48px;text-align:right">${podPct != null ? podPct.toFixed(1) + '%' : '—'}</span>
+      </div>
+      <div id="${podId}-body" data-budget-body style="display:none;background:#fff">`;
+
+    // ── Level 2: super-account / parent categories ──
+    PARENTS.forEach((parent, idx) => {
+      const glMap = {};
+      podRows.filter(r => r.parent === parent).forEach(r => {
+        if (!glMap[r.glNum]) glMap[r.glNum] = {glNum: r.glNum, glName: r.glName, actual: 0, budget: 0};
+        glMap[r.glNum].actual += r.actual;
+        glMap[r.glNum].budget += r.budget;
+      });
+      const glRows = Object.values(glMap).sort((a, b) => parseInt(a.glNum) - parseInt(b.glNum));
+      if (glRows.length === 0) return;
+
+      const pActual = glRows.reduce((s, r) => s + r.actual, 0);
+      const pBudget = glRows.reduce((s, r) => s + r.budget, 0);
       const pVar    = pActual - pBudget;
       const pPct    = pBudget ? pActual / pBudget * 100 : null;
       const pStatus = pctStatus(pActual, pBudget);
+      const parId   = podId + '-p' + idx;
 
-      html += `<tr style="background:#e8edf4">
-            <td colspan="6" style="padding:5px 10px;font-weight:700;font-size:11px;color:#334155;letter-spacing:.04em">${parent.toUpperCase()}</td>
-          </tr>`;
+      html += `<div onclick="budgetToggle('${parId}-body','${parId}-body-c')" style="cursor:pointer;border-left:3px solid #1565c0;background:#eef2f7;padding:8px 14px 8px 26px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #e2e8f0">
+          <span id="${parId}-body-c" style="display:inline-block;transition:transform .15s;font-size:10px;color:#64748b">▸</span>
+          <span style="font-weight:700;font-size:12px;color:#334155;flex:1">${parent}</span>
+          <span style="font-size:11px;color:#64748b;white-space:nowrap">${fmtUSD(pActual)} / ${fmtUSD(pBudget)}</span>
+          <span style="font-size:11px;font-weight:700;color:${statusColor(pStatus)};min-width:46px;text-align:right">${pPct != null ? pPct.toFixed(1) + '%' : '—'}</span>
+        </div>
+        <div id="${parId}-body" data-budget-body style="display:none">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead>
+              <tr style="background:#f8fafc;color:#64748b">
+                <th style="text-align:left;padding:6px 10px 6px 40px;border-bottom:1px solid #e2e8f0;font-weight:600">GL #</th>
+                <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #e2e8f0;font-weight:600">Account</th>
+                <th style="text-align:right;padding:6px 10px;border-bottom:1px solid #e2e8f0;font-weight:600">Actual</th>
+                <th style="text-align:right;padding:6px 10px;border-bottom:1px solid #e2e8f0;font-weight:600">Budget</th>
+                <th style="text-align:right;padding:6px 10px;border-bottom:1px solid #e2e8f0;font-weight:600">Variance</th>
+                <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #e2e8f0;font-weight:600;min-width:130px">% Used</th>
+              </tr>
+            </thead>
+            <tbody>`;
 
-      pRows.forEach(r => {
-        const pct    = r.budget ? r.actual / r.budget * 100 : null;
-        const status = pctStatus(r.actual, r.budget);
-        const barW   = pct != null ? Math.min(pct, 100).toFixed(1) : '0';
-        const color  = statusColor(status);
-        const rowBg  = status === 'Over Budget' ? 'background:#fff5f5;' : '';
+      glRows.forEach(r => {
+        const pct      = r.budget ? r.actual / r.budget * 100 : null;
+        const status   = pctStatus(r.actual, r.budget);
+        const color    = statusColor(status);
+        const rowBg    = status === 'Over Budget' ? 'background:#fff5f5;' : '';
         const variance = r.actual - r.budget;
         html += `<tr style="border-bottom:1px solid #f1f5f9;${rowBg}">
-            <td style="padding:6px 10px;color:#64748b">${r.glNum}</td>
-            <td style="padding:6px 10px">${r.glName || '—'}</td>
-            <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmtUSD(r.actual)}</td>
-            <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmtUSD(r.budget)}</td>
-            <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;color:${variance > 0 ? '#c62828' : '#2e7d32'}">${fmtVar(variance)}</td>
-            <td style="padding:6px 10px">
-              <div style="display:flex;align-items:center;gap:6px">
-                <div style="flex:1;background:#e2e8f0;border-radius:4px;height:7px;overflow:hidden">
-                  <div style="width:${barW}%;background:${color};height:100%;border-radius:4px;transition:width .4s"></div>
-                </div>
-                <span style="font-size:11px;color:${color};font-weight:600;min-width:38px;text-align:right">${pct != null ? pct.toFixed(1) + '%' : '—'}</span>
-              </div>
-            </td>
-          </tr>`;
+              <td style="padding:6px 10px 6px 40px;color:#64748b">${r.glNum}</td>
+              <td style="padding:6px 10px">${r.glName || '—'}</td>
+              <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmtUSD(r.actual)}</td>
+              <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmtUSD(r.budget)}</td>
+              <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;color:${variance > 0 ? '#c62828' : '#2e7d32'}">${fmtVar(variance)}</td>
+              <td style="padding:6px 10px">${pctBar(pct, color)}</td>
+            </tr>`;
       });
 
       html += `<tr style="background:#f8fafc;border-top:1.5px solid #cbd5e1;font-weight:600">
-            <td colspan="2" style="padding:6px 10px;font-size:11px;color:#475569">SUBTOTAL — ${parent.replace(' Expense', '').replace(' Expenses', '')}</td>
-            <td style="padding:6px 10px;text-align:right">${fmtUSD(pActual)}</td>
-            <td style="padding:6px 10px;text-align:right">${fmtUSD(pBudget)}</td>
-            <td style="padding:6px 10px;text-align:right;color:${pVar > 0 ? '#c62828' : '#2e7d32'}">${fmtVar(pVar)}</td>
-            <td style="padding:6px 10px">
-              <div style="display:flex;align-items:center;gap:6px">
-                <div style="flex:1;background:#e2e8f0;border-radius:4px;height:7px;overflow:hidden">
-                  <div style="width:${pPct != null ? Math.min(pPct, 100).toFixed(1) : 0}%;background:${statusColor(pStatus)};height:100%;border-radius:4px"></div>
-                </div>
-                <span style="font-size:11px;color:${statusColor(pStatus)};font-weight:700;min-width:38px;text-align:right">${pPct != null ? pPct.toFixed(1) + '%' : '—'}</span>
-              </div>
-            </td>
-          </tr>`;
+              <td colspan="2" style="padding:6px 10px 6px 40px;font-size:11px;color:#475569">SUBTOTAL — ${parent.replace(' Expense', '').replace(' Expenses', '')}</td>
+              <td style="padding:6px 10px;text-align:right">${fmtUSD(pActual)}</td>
+              <td style="padding:6px 10px;text-align:right">${fmtUSD(pBudget)}</td>
+              <td style="padding:6px 10px;text-align:right;color:${pVar > 0 ? '#c62828' : '#2e7d32'}">${fmtVar(pVar)}</td>
+              <td style="padding:6px 10px">${pctBar(pPct, statusColor(pStatus))}</td>
+            </tr>
+            </tbody>
+          </table>
+        </div>`;
     });
 
-    html += `</tbody></table></div>`;
-  }
+    html += `</div></div>`; // close pod body + pod wrapper
+  });
 
   wrap.innerHTML = html;
 }
