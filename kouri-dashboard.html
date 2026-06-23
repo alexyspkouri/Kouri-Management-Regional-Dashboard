@@ -4794,6 +4794,7 @@ let budgetYTDRows = null;
 let budgetPeriod  = 'ytd';
 let budgetLoaded  = false;
 let budgetPOD     = null;   // currently selected POD (left selector)
+let budgetView    = 'consolidated';  // 'consolidated' (Book1 sub-groups) | 'property' (individual)
 
 function setBudgetPeriod(period) {
   budgetPeriod = period;
@@ -4861,6 +4862,11 @@ function budgetToggle(bodyId, caretId) {
 
 function setBudgetPOD(pod) {
   budgetPOD = pod;
+  renderBudget();
+}
+
+function setBudgetView(v) {
+  budgetView = v;
   renderBudget();
 }
 
@@ -4949,18 +4955,34 @@ function renderBudget() {
   const podRows = rows.filter(r => r.pod === budgetPOD);
   const podA = _bSum(podRows, r => r.actual), podB = _bSum(podRows, r => r.budget);
 
+  const _viewBtn = (v, label) => `<button onclick="setBudgetView('${v}')" style="font-size:11px;padding:4px 11px;border:1.5px solid ${budgetView === v ? '#1565c0' : '#cbd5e1'};background:${budgetView === v ? '#1565c0' : '#fff'};color:${budgetView === v ? '#fff' : '#555'};border-radius:6px;cursor:pointer;font-weight:600">${label}</button>`;
   let right = `<div style="flex:1;min-width:0;padding-left:14px">
-    <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;padding:2px 4px 12px">
-      <span style="font-weight:700;font-size:15px;color:#1e293b">${budgetPOD || '—'}</span>
-      <span style="font-size:12px;color:#64748b">${_bFmtUSD(podA)} actual / ${_bFmtUSD(podB)} budget · <span style="color:${_bColor(_bStatus(podA, podB))};font-weight:700">${podB ? (podA / podB * 100).toFixed(1) + '%' : '—'} used</span></span>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:2px 4px 12px">
+      <div>
+        <span style="font-weight:700;font-size:15px;color:#1e293b">${budgetPOD || '—'}</span>
+        <span style="font-size:12px;color:#64748b;margin-left:8px">${_bFmtUSD(podA)} / ${_bFmtUSD(podB)} · <span style="color:${_bColor(_bStatus(podA, podB))};font-weight:700">${podB ? (podA / podB * 100).toFixed(1) + '%' : '—'} used</span></span>
+      </div>
+      <div style="display:flex;gap:6px">${_viewBtn('consolidated', 'Consolidated')}${_viewBtn('property', 'By Property')}</div>
     </div>`;
 
-  // Level 2: sub-groups
-  const subgroups = [...new Set(podRows.map(r => r.subGroup))].sort();
-  subgroups.forEach((sg, si) => {
-    const sgRows = podRows.filter(r => r.subGroup === sg);
+  // Level 2 grouping: consolidated = Book1 sub-groups; property = individual properties
+  let groups;
+  if (budgetView === 'property') {
+    const ids = [...new Set(podRows.map(r => r.propId))];
+    groups = ids.map(id => {
+      const gr = podRows.filter(r => r.propId === id);
+      const label = (gr[0] && gr[0].prop) ? gr[0].prop : ('Property ' + (id || '—'));
+      return { label, rows: gr };
+    }).sort((a, b) => a.label.localeCompare(b.label));
+  } else {
+    const sgs = [...new Set(podRows.map(r => r.subGroup))].sort();
+    groups = sgs.map(sg => ({ label: sg, rows: podRows.filter(r => r.subGroup === sg) }));
+  }
+
+  groups.forEach((g, si) => {
+    const sgRows = g.rows;
     const sgId = `bsg${si}`;
-    right += _bDrillRow(sgId, 0, sg, _bSum(sgRows, r => r.actual), _bSum(sgRows, r => r.budget), '#1e293b');
+    right += _bDrillRow(sgId, 0, g.label, _bSum(sgRows, r => r.actual), _bSum(sgRows, r => r.budget), '#1e293b');
     right += `<div id="${sgId}" data-budget-body style="display:none">`;
 
     // Level 3: parent (Controllable / Capital)
