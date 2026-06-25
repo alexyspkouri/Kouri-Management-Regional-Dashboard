@@ -4875,6 +4875,13 @@ const _bFmtUSD = v => v == null ? '—' : '$' + Math.abs(v).toLocaleString('en-U
 const _bFmtVar = v => (v >= 0 ? '+' : '−') + '$' + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0});
 const _bStatus = (a, b) => !b ? 'Under 50%' : a >= b ? 'Over Budget' : a >= b * 0.5 ? '50–100%' : 'Under 50%';
 const _bColor  = s => s === 'Over Budget' ? '#c62828' : s === '50–100%' ? '#f57c00' : '#2e7d32';
+// Mode-aware coloring: 'expense' (at/over budget = red), 'income' (at/over = green, good), 'neutral' (gray, for mixed totals)
+const _bModeColor = (a, b, mode) => {
+  if (mode === 'neutral') return '#64748b';
+  if (mode === 'income') return !b ? '#64748b' : a >= b ? '#2e7d32' : a >= b * 0.5 ? '#f57c00' : '#c62828';
+  return _bColor(_bStatus(a, b));
+};
+const _bVarColor = (v, mode) => mode === 'neutral' ? '#64748b' : mode === 'income' ? (v >= 0 ? '#2e7d32' : '#c62828') : (v > 0 ? '#c62828' : '#2e7d32');
 const _bBar = (pct, color) => `<div style="display:flex;align-items:center;gap:6px;min-width:120px">
       <div style="flex:1;background:#e2e8f0;border-radius:4px;height:7px;overflow:hidden">
         <div style="width:${pct != null ? Math.min(pct, 100).toFixed(1) : 0}%;background:${color};height:100%;border-radius:4px;transition:width .4s"></div>
@@ -4884,17 +4891,16 @@ const _bBar = (pct, color) => `<div style="display:flex;align-items:center;gap:6
 const _bSum = (arr, f) => arr.reduce((s, r) => s + f(r), 0);
 
 // A collapsible drill row: header (clickable) + hidden body container.
-function _bDrillRow(id, depth, label, actual, budget, indentColor) {
+function _bDrillRow(id, depth, label, actual, budget, indentColor, mode) {
   const pct    = budget ? actual / budget * 100 : null;
-  const status = _bStatus(actual, budget);
   const variance = actual - budget;
   const pad    = 12 + depth * 18;
   return `<div onclick="budgetToggle('${id}','${id}-c')" style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:8px 12px 8px ${pad}px;border-bottom:1px solid #eef2f7;border-left:3px solid ${indentColor};background:${depth === 0 ? '#f1f5f9' : '#fff'}">
       <span id="${id}-c" style="display:inline-block;transition:transform .15s;font-size:10px;color:#94a3b8;width:10px">▸</span>
       <span style="flex:1;font-weight:${depth === 0 ? 700 : 600};font-size:${13 - depth}px;color:#334155">${label}</span>
       <span style="font-size:11px;color:#64748b;white-space:nowrap;min-width:150px;text-align:right">${_bFmtUSD(actual)} / ${_bFmtUSD(budget)}</span>
-      <span style="font-size:11px;font-weight:700;color:${variance > 0 ? '#c62828' : '#2e7d32'};min-width:78px;text-align:right">${_bFmtVar(variance)}</span>
-      ${_bBar(pct, _bColor(status))}
+      <span style="font-size:11px;font-weight:700;color:${_bVarColor(variance, mode)};min-width:78px;text-align:right">${_bFmtVar(variance)}</span>
+      ${_bBar(pct, _bModeColor(actual, budget, mode))}
     </div>`;
 }
 
@@ -4925,6 +4931,7 @@ function renderBudget() {
   // Badge: # of over-budget super-account categories (POD × parent) company-wide
   let overCount = 0; const seenCat = {};
   rows.forEach(r => {
+    if (r.parent === 'Rent Income' || r.parent === 'Other Income') return;  // income isn't "over budget"
     const k = r.pod + '|' + r.parent;
     if (seenCat[k]) return; seenCat[k] = true;
     const cr = rows.filter(x => x.pod === r.pod && x.parent === r.parent);
@@ -4945,22 +4952,26 @@ function renderBudget() {
     const sel = pod === budgetPOD;
     left += `<div onclick="setBudgetPOD('${pod.replace(/'/g, "\\'")}')" style="cursor:pointer;padding:8px 10px;margin-bottom:3px;border-radius:7px;background:${sel ? '#1e293b' : 'transparent'};color:${sel ? '#fff' : '#334155'}">
         <div style="font-weight:${sel ? 700 : 600};font-size:12px">${pod}</div>
-        <div style="font-size:10px;color:${sel ? '#cbd5e1' : '#94a3b8'};margin-top:2px">${_bFmtUSD(a)} / ${_bFmtUSD(b)} · <span style="color:${sel ? '#fff' : _bColor(_bStatus(a, b))};font-weight:700">${pct != null ? pct.toFixed(0) + '%' : '—'}</span></div>
+        <div style="font-size:10px;color:${sel ? '#cbd5e1' : '#94a3b8'};margin-top:2px">${_bFmtUSD(a)} / ${_bFmtUSD(b)}</div>
       </div>`;
   });
   left += `</div>`;
 
   // ── RIGHT: drill-down for selected POD ──────────────────────────────
-  const PARENTS = ['Controllable Operating Expense', 'Capital Expenses'];
+  const PARENTS = ['Rent Income', 'Other Income', 'Controllable Operating Expense', 'Capital Expenses'];
   const podRows = rows.filter(r => r.pod === budgetPOD);
-  const podA = _bSum(podRows, r => r.actual), podB = _bSum(podRows, r => r.budget);
+  const _isIncomeParent = p => p === 'Rent Income' || p === 'Other Income';
+  const incRows = podRows.filter(r => _isIncomeParent(r.parent));
+  const expRows = podRows.filter(r => !_isIncomeParent(r.parent));
+  const podIncA = _bSum(incRows, r => r.actual), podIncB = _bSum(incRows, r => r.budget);
+  const podExpA = _bSum(expRows, r => r.actual), podExpB = _bSum(expRows, r => r.budget);
 
   const _viewBtn = (v, label) => `<button onclick="setBudgetView('${v}')" style="font-size:11px;padding:4px 11px;border:1.5px solid ${budgetView === v ? '#1565c0' : '#cbd5e1'};background:${budgetView === v ? '#1565c0' : '#fff'};color:${budgetView === v ? '#fff' : '#555'};border-radius:6px;cursor:pointer;font-weight:600">${label}</button>`;
   let right = `<div style="flex:1;min-width:0;padding-left:14px">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:2px 4px 12px">
       <div>
         <span style="font-weight:700;font-size:15px;color:#1e293b">${budgetPOD || '—'}</span>
-        <span style="font-size:12px;color:#64748b;margin-left:8px">${_bFmtUSD(podA)} / ${_bFmtUSD(podB)} · <span style="color:${_bColor(_bStatus(podA, podB))};font-weight:700">${podB ? (podA / podB * 100).toFixed(1) + '%' : '—'} used</span></span>
+        <span style="font-size:12px;color:#64748b;margin-left:8px">Income <b style="color:#15803d">${_bFmtUSD(podIncA)}</b> / ${_bFmtUSD(podIncB)} &nbsp;·&nbsp; Expense <b style="color:#1565c0">${_bFmtUSD(podExpA)}</b> / ${_bFmtUSD(podExpB)}</span>
       </div>
       <div style="display:flex;gap:6px">${_viewBtn('consolidated', 'Consolidated')}${_viewBtn('property', 'By Property')}</div>
     </div>`;
@@ -4982,30 +4993,32 @@ function renderBudget() {
   groups.forEach((g, si) => {
     const sgRows = g.rows;
     const sgId = `bsg${si}`;
-    right += _bDrillRow(sgId, 0, g.label, _bSum(sgRows, r => r.actual), _bSum(sgRows, r => r.budget), '#1e293b');
+    right += _bDrillRow(sgId, 0, g.label, _bSum(sgRows, r => r.actual), _bSum(sgRows, r => r.budget), '#1e293b', 'neutral');
     right += `<div id="${sgId}" data-budget-body style="display:none">`;
 
-    // Level 3: parent (Controllable / Capital)
+    // Level 3: parent — income first (Rent/Other Income), then expenses
     PARENTS.forEach((parent, pi) => {
       const pRows = sgRows.filter(r => r.parent === parent);
       if (pRows.length === 0) return;
+      const isInc = parent === 'Rent Income' || parent === 'Other Income';
+      const pMode = isInc ? 'income' : 'expense';
       const pId = `${sgId}-p${pi}`;
-      right += _bDrillRow(pId, 1, parent, _bSum(pRows, r => r.actual), _bSum(pRows, r => r.budget), '#1565c0');
+      right += _bDrillRow(pId, 1, parent, _bSum(pRows, r => r.actual), _bSum(pRows, r => r.budget), isInc ? '#15803d' : '#1565c0', pMode);
       right += `<div id="${pId}" data-budget-body style="display:none">`;
 
-      if (parent === 'Capital Expenses') {
-        // Single layer: GL leaves directly
-        right += _bGLTable(pRows, 2);
+      if (parent === 'Capital Expenses' || isInc) {
+        // Single layer: GL leaves directly (income + capex)
+        right += _bGLTable(pRows, 2, pMode);
       } else {
-        // Level 4: mid-tier account category
+        // Level 4: mid-tier account category (controllable expenses only)
         const cats = [...new Set(pRows.map(r => r.category || 'Other'))].sort();
         cats.forEach((cat, ci) => {
           const cRows = pRows.filter(r => (r.category || 'Other') === cat);
           const cId = `${pId}-c${ci}`;
-          right += _bDrillRow(cId, 2, cat, _bSum(cRows, r => r.actual), _bSum(cRows, r => r.budget), '#0891b2');
+          right += _bDrillRow(cId, 2, cat, _bSum(cRows, r => r.actual), _bSum(cRows, r => r.budget), '#0891b2', 'expense');
           right += `<div id="${cId}" data-budget-body style="display:none">`;
           // Level 5: GL leaves
-          right += _bGLTable(cRows, 3);
+          right += _bGLTable(cRows, 3, 'expense');
           right += `</div>`;
         });
       }
@@ -5019,7 +5032,7 @@ function renderBudget() {
 }
 
 // GL leaf table — aggregates rows by GL # across properties.
-function _bGLTable(rows, depth) {
+function _bGLTable(rows, depth, mode) {
   const glMap = {};
   rows.forEach(r => {
     if (!glMap[r.glNum]) glMap[r.glNum] = {glNum: r.glNum, glName: r.glName, actual: 0, budget: 0};
@@ -5039,16 +5052,16 @@ function _bGLTable(rows, depth) {
     </tr></thead><tbody>`;
   gls.forEach(r => {
     const pct = r.budget ? r.actual / r.budget * 100 : null;
-    const status = _bStatus(r.actual, r.budget);
     const variance = r.actual - r.budget;
-    const rowBg = status === 'Over Budget' ? 'background:#fff5f5;' : '';
+    const color = _bModeColor(r.actual, r.budget, mode);
+    const rowBg = (mode === 'expense' && r.budget && r.actual >= r.budget) ? 'background:#fff5f5;' : '';
     html += `<tr style="border-bottom:1px solid #f1f5f9;${rowBg}">
         <td style="padding:5px 10px 5px ${pad}px;color:#64748b">${r.glNum}</td>
         <td style="padding:5px 10px">${r.glName || '—'}</td>
         <td style="padding:5px 10px;text-align:right;font-variant-numeric:tabular-nums">${_bFmtUSD(r.actual)}</td>
         <td style="padding:5px 10px;text-align:right;font-variant-numeric:tabular-nums">${_bFmtUSD(r.budget)}</td>
-        <td style="padding:5px 10px;text-align:right;font-variant-numeric:tabular-nums;color:${variance > 0 ? '#c62828' : '#2e7d32'}">${_bFmtVar(variance)}</td>
-        <td style="padding:5px 10px">${_bBar(pct, _bColor(status))}</td>
+        <td style="padding:5px 10px;text-align:right;font-variant-numeric:tabular-nums;color:${_bVarColor(variance, mode)}">${_bFmtVar(variance)}</td>
+        <td style="padding:5px 10px">${_bBar(pct, color)}</td>
       </tr>`;
   });
   html += `</tbody></table>`;
